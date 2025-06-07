@@ -59,12 +59,19 @@ class CryptoDataFetcher:
             'order': 'market_cap_desc',
             'per_page': limit,
             'page': 1,
-            'sparkline': False,
-            'price_change_percentage': '24h'
+            'sparkline': 'false'  # Changed from False to 'false'
+            # Removed price_change_percentage parameter as it might cause issues
         }
             
         try:
+            print(f"Fetching from: {endpoint}")
+            print(f"Parameters: {params}")
             response = requests.get(endpoint, params=params, headers=self.headers)
+            print(f"Response status: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"Response content: {response.text}")
+            
             response.raise_for_status()
             
             data = response.json()
@@ -85,6 +92,9 @@ class CryptoDataFetcher:
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 429:
                 print("Rate limit exceeded. Please wait or use an API key.")
+            elif e.response.status_code == 400:
+                print(f"Bad request. URL: {e.response.url}")
+                print(f"Response: {e.response.text}")
             raise
     
     def fetch_historical_data(self, coin_id, days=1825):  # 5 years = 1825 days
@@ -251,11 +261,11 @@ class CryptoDataFetcher:
                     self.status.update_step(f"fetch_{coin_id}", "success", 
                                           f"{len(df)} days of data")
                     
-                    # Rate limiting
+                    # Rate limiting - increase wait time for public API
                     if self.api_key:
                         time.sleep(0.5)
                     else:
-                        time.sleep(2.5)
+                        time.sleep(3.0)  # Increased from 2.5 to 3.0 seconds
                     
                 except Exception as e:
                     error_msg = f"Error fetching data for {coin_id}: {str(e)}"
