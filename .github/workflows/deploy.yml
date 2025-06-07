@@ -49,18 +49,43 @@ jobs:
       continue-on-error: false
       timeout-minutes: 10
     
+    # Critical debug step
+    - name: Debug - Check where files were created
+      run: |
+        echo "=== Looking for all CSV and JSON files ==="
+        find . -name "*.csv" -o -name "*.json" | grep -E "(combined_data|metadata|pipeline_status)" | while read file; do
+          echo "Found: $file (size: $(stat -c%s "$file") bytes)"
+        done
+        
+        echo -e "\n=== Expected location: backend/data/ ==="
+        if [ -d "backend/data" ]; then
+          ls -la backend/data/
+        else
+          echo "Directory backend/data does not exist!"
+        fi
+        
+        echo -e "\n=== Checking if combined_data.csv exists ==="
+        if [ -f "backend/data/combined_data.csv" ]; then
+          echo "✓ combined_data.csv found at expected location"
+          echo "First 3 lines:"
+          head -3 backend/data/combined_data.csv
+        else
+          echo "✗ combined_data.csv NOT found at backend/data/"
+        fi
+    
     - name: Upload data artifacts
       uses: actions/upload-artifact@v4
       with:
         name: crypto-data
         path: backend/data/
         retention-days: 7
+        if-no-files-found: error
     
     - name: Check pipeline status
       run: |
         if [ -f "backend/data/pipeline_status.json" ]; then
           echo "Pipeline status:"
-          cat backend/data/pipeline_status.json
+          cat backend/data/pipeline_status.json | python -m json.tool
         else
           echo "No pipeline status file found"
           exit 1
@@ -78,11 +103,33 @@ jobs:
         name: crypto-data
         path: backend/data/
     
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
+    - name: Debug - Verify downloaded files
+      run: |
+        echo "=== Contents of backend/data/ after artifact download ==="
+        ls -la backend/data/
+        
+        echo -e "\n=== Verifying critical files ==="
+        for file in combined_data.csv metadata.json; do
+          if [ -f "backend/data/$file" ]; then
+            echo "✓ $file exists (size: $(stat -c%s "backend/data/$file") bytes)"
+          else
+            echo "✗ $file is missing!"
+            exit 1
+          fi
+        done
+    
+    - name: Set up Python for wrapper script
+      uses: actions/setup-python@v4
       with:
-        toolchain: stable
-        override: true
+        python-version: '3.11'
+    
+    - name: Install Python dependencies for wrapper
+      run: |
+        cd backend/data_fetcher
+        pip install -r requirements.txt
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
     
     - name: Cache Rust dependencies
       uses: actions/cache@v3
@@ -93,10 +140,34 @@ jobs:
           backend/rust_analyzer/target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Build and run Rust analyzer
+    - name: Debug - Check Rust project structure
       run: |
-        cd backend/data_fetcher
-        python rust_analyzer_wrapper.py
+        echo "=== Rust project location ==="
+        ls -la backend/rust_analyzer/
+        echo -e "\n=== Cargo.toml contents ==="
+        cat backend/rust_analyzer/Cargo.toml
+    
+    - name: Build Rust project first
+      run: |
+        cd backend/rust_analyzer
+        cargo build --release
+    
+    - name: Run Rust analyzer directly (debug)
+      run: |
+        echo "=== Running from backend/rust_analyzer ==="
+        cd backend/rust_analyzer
+        
+        echo "Current directory: $(pwd)"
+        echo "Looking for data in: ../data/"
+        echo "Contents of ../data/:"
+        ls -la ../data/ || echo "Directory not found"
+        
+        echo -e "\n=== Running analyzer ==="
+        cargo run --release || {
+          echo "=== Rust analyzer failed ==="
+          echo "Check if the error mentions missing files"
+          exit 1
+        }
     
     - name: Verify analysis outputs
       run: |
