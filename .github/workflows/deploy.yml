@@ -129,11 +129,6 @@ jobs:
         name: analysis-results
         path: frontend/data/
     
-    - name: Copy status page
-      run: |
-        cp backend/data_fetcher/status.html frontend/
-        echo "Status page copied to frontend/"
-    
     - name: Setup Pages
       uses: actions/configure-pages@v3
     
