@@ -548,7 +548,7 @@
             }
         }
 
-        // Create individual chart
+        // Create chart with confidence bands
         function createChart(container, data, dataKey, title, color) {
             const wrapper = document.createElement('div');
             wrapper.className = 'chart-wrapper';
@@ -563,13 +563,14 @@
             controls.className = 'chart-controls';
             controls.innerHTML = `
                 <button class="chart-control-btn" onclick="resetZoom('${dataKey}')">Reset Zoom</button>
+                <button class="chart-control-btn" onclick="toggleConfidenceBands('${dataKey}')">Toggle 90% CI</button>
             `;
             wrapper.appendChild(controls);
 
             // Add instructions
             const instructions = document.createElement('div');
             instructions.className = 'chart-instructions';
-            instructions.textContent = 'Scroll to zoom, drag to pan';
+            instructions.textContent = 'Scroll to zoom, drag to pan. Shaded area shows 90% confidence interval.';
             wrapper.appendChild(instructions);
 
             const canvas = document.createElement('canvas');
@@ -592,23 +593,60 @@
                 minDate.setDate(minDate.getDate() - viewSize + 1);
             }
 
+            // Prepare datasets
+            const datasets = [
+                {
+                    label: title,
+                    data: validData.map(d => d[dataKey]),
+                    borderColor: color,
+                    backgroundColor: color + '20',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0.1,
+                    fill: false,
+                    spanGaps: false
+                }
+            ];
+
+            // Add confidence band datasets if available
+            const lowerKey = dataKey + '_lower_90';
+            const upperKey = dataKey + '_upper_90';
+            
+            if (validData.length > 0 && validData[0][lowerKey] !== undefined) {
+                // Upper confidence band
+                datasets.push({
+                    label: 'Upper 90% CI',
+                    data: validData.map(d => d[upperKey]),
+                    borderColor: 'rgba(128, 128, 128, 0.3)',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+                
+                // Lower confidence band (with fill to upper)
+                datasets.push({
+                    label: 'Lower 90% CI',
+                    data: validData.map(d => d[lowerKey]),
+                    borderColor: 'rgba(128, 128, 128, 0.3)',
+                    backgroundColor: 'rgba(128, 128, 128, 0.15)',
+                    fill: '-1', // Fill to previous dataset (upper band)
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+            }
+
             const ctx = canvas.getContext('2d');
             const chart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: validData.map(d => d.date),
-                    datasets: [{
-                        label: title,
-                        data: validData.map(d => d[dataKey]),
-                        borderColor: color,
-                        backgroundColor: color + '20',
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        pointHoverRadius: 5,
-                        tension: 0.1,
-                        fill: true,
-                        spanGaps: false
-                    }]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -619,7 +657,19 @@
                     },
                     plugins: {
                         legend: {
-                            display: false
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                filter: function(item) {
+                                    // Only show main series in legend
+                                    return !item.text.includes('CI');
+                                },
+                                color: '#e0e0e0',
+                                padding: 15,
+                                font: {
+                                    size: 12
+                                }
+                            }
                         },
                         tooltip: {
                             backgroundColor: 'rgba(0, 0, 0, 0.9)',
@@ -631,8 +681,40 @@
                             displayColors: false,
                             callbacks: {
                                 label: function(context) {
-                                    const value = context.parsed.y;
-                                    return `${title}: ${value.toFixed(6)}`;
+                                    if (context.datasetIndex === 0) {
+                                        const index = context.dataIndex;
+                                        const value = context.parsed.y;
+                                        const lower = validData[index][lowerKey];
+                                        const upper = validData[index][upperKey];
+                                        
+                                        let labels = [`${title}: ${value.toFixed(6)}`];
+                                        
+                                        if (lower !== undefined && upper !== undefined) {
+                                            labels.push(`90% CI: [${lower.toFixed(6)}, ${upper.toFixed(6)}]`);
+                                            
+                                            // Add hypothesis test interpretation
+                                            if (dataKey === 'beta') {
+                                                if (lower > 1) {
+                                                    labels.push('⚠️ Significantly > 1 (higher volatility than BTC)');
+                                                } else if (upper < 1) {
+                                                    labels.push('✓ Significantly < 1 (lower volatility than BTC)');
+                                                } else {
+                                                    labels.push('↔️ Not significantly different from 1');
+                                                }
+                                            } else if (dataKey === 'alpha') {
+                                                if (lower > 0) {
+                                                    labels.push('✓ Significantly > 0 (positive excess return)');
+                                                } else if (upper < 0) {
+                                                    labels.push('⚠️ Significantly < 0 (negative excess return)');
+                                                } else {
+                                                    labels.push('↔️ Not significantly different from 0');
+                                                }
+                                            }
+                                        }
+                                        
+                                        return labels;
+                                    }
+                                    return null;
                                 }
                             }
                         },
@@ -650,10 +732,7 @@
                             pan: {
                                 enabled: true,
                                 mode: 'x',
-                                modifierKey: null,
-                                onPanComplete: function({chart}) {
-                                    // Optional: Update something when pan completes
-                                }
+                                modifierKey: null
                             },
                             zoom: {
                                 wheel: {
@@ -666,10 +745,7 @@
                                 pinch: {
                                     enabled: true
                                 },
-                                mode: 'x',
-                                onZoomComplete: function({chart}) {
-                                    // Optional: Update something when zoom completes
-                                }
+                                mode: 'x'
                             }
                         }
                     },
@@ -709,6 +785,25 @@
             });
 
             charts[dataKey] = chart;
+            
+            // Store the confidence band visibility state
+            chart.confidenceBandsVisible = true;
+        }
+
+        // Function to toggle confidence bands
+        window.toggleConfidenceBands = function(chartKey) {
+            const chart = charts[chartKey];
+            if (chart) {
+                chart.confidenceBandsVisible = !chart.confidenceBandsVisible;
+                
+                // Toggle visibility of CI datasets
+                if (chart.data.datasets.length > 1) {
+                    chart.data.datasets[1].hidden = !chart.confidenceBandsVisible;
+                    chart.data.datasets[2].hidden = !chart.confidenceBandsVisible;
+                }
+                
+                chart.update('none');
+            }
         }
 
         // Create comparison chart

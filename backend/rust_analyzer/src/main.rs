@@ -12,7 +12,7 @@ use csv::ReaderBuilder;
 struct CombinedDataRow {
     date: String,
     #[serde(flatten)]
-    prices_and_returns: HashMap<String, Option<f64>>, // Changed to Option<f64> to handle NaN/missing values
+    prices_and_returns: HashMap<String, Option<f64>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -21,6 +21,11 @@ pub struct RegressionResult {
     date: String,
     alpha: Option<f64>,
     beta: Option<f64>,
+    // Add confidence intervals
+    alpha_lower_90: Option<f64>,
+    alpha_upper_90: Option<f64>,
+    beta_lower_90: Option<f64>,
+    beta_upper_90: Option<f64>,
     window_size: usize,
 }
 
@@ -36,6 +41,14 @@ pub struct AnalysisMetadata {
     window_size: usize,
     analysis_date: String,
     total_coins: usize,
+}
+
+// Structure to hold regression results with standard errors
+struct RegressionOutput {
+    alpha: f64,
+    beta: f64,
+    se_alpha: f64,
+    se_beta: f64,
 }
 
 pub struct RollingRegressionAnalyzer {
@@ -66,7 +79,7 @@ impl RollingRegressionAnalyzer {
         
         let mut reader = ReaderBuilder::new()
             .has_headers(true)
-            .flexible(true) // Allow variable number of fields
+            .flexible(true)
             .from_reader(file);
         
         let mut data = Vec::new();
@@ -87,7 +100,6 @@ impl RollingRegressionAnalyzer {
                             if header == "date" {
                                 date = field.to_string();
                             } else {
-                                // Try to parse as f64, use None if it fails
                                 let value = field.parse::<f64>().ok();
                                 row_data.insert(header.to_string(), value);
                             }
@@ -103,7 +115,6 @@ impl RollingRegressionAnalyzer {
                 }
                 Err(e) => {
                     eprintln!("Error reading row {}: {:?}", i + 1, e);
-                    // Continue processing other rows
                 }
             }
         }
@@ -121,8 +132,34 @@ impl RollingRegressionAnalyzer {
         })
     }
     
-    /// Perform OLS regression: y = alpha + beta * x + epsilon
-    fn ols_regression(x: &[f64], y: &[f64]) -> Result<(f64, f64), Box<dyn Error>> {
+    /// Compute t-statistic for 90% confidence interval
+    fn t_statistic_90(df: usize) -> f64 {
+        // For 90% CI, α = 0.10, so we need t(0.05, df)
+        // This is a simplified approximation - for production, use a proper stats library
+        match df {
+            1 => 6.314,
+            2 => 2.920,
+            3 => 2.353,
+            4 => 2.132,
+            5 => 2.015,
+            6 => 1.943,
+            7 => 1.895,
+            8 => 1.860,
+            9 => 1.833,
+            10 => 1.812,
+            11..=15 => 1.761,
+            16..=20 => 1.729,
+            21..=25 => 1.711,
+            26..=30 => 1.699,
+            31..=40 => 1.684,
+            41..=60 => 1.671,
+            61..=120 => 1.658,
+            _ => 1.645, // For df > 120, approximates normal distribution
+        }
+    }
+    
+    /// Perform OLS regression with standard errors and confidence intervals
+    fn ols_regression_with_ci(x: &[f64], y: &[f64]) -> Result<RegressionOutput, Box<dyn Error>> {
         if x.len() != y.len() || x.is_empty() {
             return Err("Invalid input dimensions".into());
         }
@@ -143,14 +180,38 @@ impl RollingRegressionAnalyzer {
         let xtx = x_matrix.transpose() * &x_matrix;
         let xty = x_matrix.transpose() * &y_vector;
         
-        let coefficients = xtx.try_inverse()
-            .ok_or("Matrix is singular")?
-            * xty;
+        let xtx_inv = xtx.try_inverse()
+            .ok_or("Matrix is singular")?;
+        
+        let coefficients = &xtx_inv * xty;
         
         let alpha = coefficients[0];
         let beta = coefficients[1];
         
-        Ok((alpha, beta))
+        // Calculate fitted values and residuals
+        let y_fitted = &x_matrix * &coefficients;
+        let residuals = &y_vector - &y_fitted;
+        
+        // Calculate residual sum of squares
+        let rss: f64 = residuals.iter().map(|r| r * r).sum();
+        
+        // Calculate standard errors
+        let df = n - 2; // degrees of freedom
+        let mse = rss / df as f64; // mean squared error
+        
+        // Variance-covariance matrix = MSE * (X'X)^(-1)
+        let var_cov = xtx_inv * mse;
+        
+        // Standard errors are square roots of diagonal elements
+        let se_alpha = var_cov[(0, 0)].sqrt();
+        let se_beta = var_cov[(1, 1)].sqrt();
+        
+        Ok(RegressionOutput {
+            alpha,
+            beta,
+            se_alpha,
+            se_beta,
+        })
     }
     
     pub fn analyze_rolling_window(&self, window_size: usize) -> Result<AnalysisOutput, Box<dyn Error>> {
@@ -196,7 +257,7 @@ impl RollingRegressionAnalyzer {
                         self.data[j].prices_and_returns.get(&ref_key),
                         self.data[j].prices_and_returns.get(&coin_key)
                     ) {
-                        // Only include if both values are finite (not NaN or infinity)
+                        // Only include if both values are finite
                         if ref_ret.is_finite() && coin_ret.is_finite() {
                             ref_returns.push(*ref_ret);
                             coin_returns.push(*coin_ret);
@@ -206,13 +267,24 @@ impl RollingRegressionAnalyzer {
                 
                 // Only perform regression if we have enough valid data points
                 if ref_returns.len() >= window_size / 2 {
-                    match Self::ols_regression(&ref_returns, &coin_returns) {
-                        Ok((alpha, beta)) => {
+                    match Self::ols_regression_with_ci(&ref_returns, &coin_returns) {
+                        Ok(reg_output) => {
+                            // Calculate confidence intervals
+                            let df = ref_returns.len() - 2;
+                            let t_stat = Self::t_statistic_90(df);
+                            
+                            let alpha_margin = t_stat * reg_output.se_alpha;
+                            let beta_margin = t_stat * reg_output.se_beta;
+                            
                             coin_results.push(RegressionResult {
                                 coin_id: coin_id.to_string(),
                                 date: self.data[i - 1].date.clone(),
-                                alpha: Some(alpha),
-                                beta: Some(beta),
+                                alpha: Some(reg_output.alpha),
+                                beta: Some(reg_output.beta),
+                                alpha_lower_90: Some(reg_output.alpha - alpha_margin),
+                                alpha_upper_90: Some(reg_output.alpha + alpha_margin),
+                                beta_lower_90: Some(reg_output.beta - beta_margin),
+                                beta_upper_90: Some(reg_output.beta + beta_margin),
                                 window_size,
                             });
                         }
@@ -223,6 +295,10 @@ impl RollingRegressionAnalyzer {
                                 date: self.data[i - 1].date.clone(),
                                 alpha: None,
                                 beta: None,
+                                alpha_lower_90: None,
+                                alpha_upper_90: None,
+                                beta_lower_90: None,
+                                beta_upper_90: None,
                                 window_size,
                             });
                         }
@@ -234,6 +310,10 @@ impl RollingRegressionAnalyzer {
                         date: self.data[i - 1].date.clone(),
                         alpha: None,
                         beta: None,
+                        alpha_lower_90: None,
+                        alpha_upper_90: None,
+                        beta_lower_90: None,
+                        beta_upper_90: None,
                         window_size,
                     });
                 }
@@ -248,7 +328,7 @@ impl RollingRegressionAnalyzer {
                 reference_coin: self.reference_coin.clone(),
                 window_size,
                 analysis_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
-                total_coins: coins.len() - 1,  // Excluding reference coin
+                total_coins: coins.len() - 1,
             },
             results: all_results,
         };
@@ -264,7 +344,7 @@ impl RollingRegressionAnalyzer {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("Starting Rust regression analyzer...");
+    println!("Starting Rust regression analyzer with confidence intervals...");
     
     // Try to load analyzer
     let analyzer = match RollingRegressionAnalyzer::new("../data") {
@@ -296,6 +376,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     
-    println!("\nAnalysis complete!");
+    println!("\nAnalysis complete with confidence intervals!");
     Ok(())
 }
