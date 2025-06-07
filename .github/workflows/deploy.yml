@@ -79,18 +79,8 @@ jobs:
       with:
         name: crypto-data
         path: backend/data/
-        retention-days: 7
+        retention-days: 1
         if-no-files-found: error
-    
-    - name: Check pipeline status
-      if: always()
-      run: |
-        if [ -f "backend/data/pipeline_status.json" ]; then
-          echo "Pipeline status:"
-          cat backend/data/pipeline_status.json | python -m json.tool | head -50
-        else
-          echo "No pipeline status file found"
-        fi
 
   analyze-data:
     needs: fetch-data
@@ -149,14 +139,18 @@ jobs:
         done
         echo "All expected files found!"
     
-    - name: Upload analysis results
-      uses: actions/upload-artifact@v4
+    - name: Copy data to frontend
+      run: |
+        mkdir -p frontend/data
+        cp backend/data/*.json frontend/data/
+        cp backend/data/combined_data.csv frontend/data/
+        echo "Files copied to frontend/data:"
+        ls -la frontend/data/
+    
+    - name: Upload pages artifact
+      uses: actions/upload-pages-artifact@v3
       with:
-        name: analysis-results
-        path: backend/data/*.json
-        retention-days: 1
-        compression-level: 0
-        overwrite: true
+        path: frontend/
 
   deploy:
     needs: analyze-data
@@ -168,35 +162,9 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Download analysis results
-      uses: actions/download-artifact@v4
-      with:
-        name: analysis-results
-        path: frontend/data/
-      timeout-minutes: 5
-    
-    - name: Verify frontend structure
-      run: |
-        echo "Frontend directory structure:"
-        ls -la frontend/
-        echo "Frontend data directory:"
-        ls -la frontend/data/ || echo "No data directory yet"
-        echo "Creating data directory if needed:"
-        mkdir -p frontend/data
-    
-    - name: Setup Pages
-      uses: actions/configure-pages@v3
-    
-    - name: Upload artifact
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: './frontend'
-    
     - name: Deploy to GitHub Pages
       id: deployment
-      uses: actions/deploy-pages@v2
+      uses: actions/deploy-pages@v4
 
   cleanup:
     needs: deploy
@@ -208,4 +176,3 @@ jobs:
       with:
         name: |
           crypto-data
-          analysis-results
