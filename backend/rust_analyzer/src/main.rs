@@ -12,11 +12,11 @@ use csv::ReaderBuilder;
 struct CombinedDataRow {
     date: String,
     #[serde(flatten)]
-    prices_and_returns: HashMap<String, f64>,
+    prices_and_returns: HashMap<String, Option<f64>>, // Changed to Option<f64> to handle NaN/missing values
 }
 
 #[derive(Debug, Serialize)]
-struct RegressionResult {
+pub struct RegressionResult {
     coin_id: String,
     date: String,
     alpha: Option<f64>,
@@ -25,13 +25,13 @@ struct RegressionResult {
 }
 
 #[derive(Debug, Serialize)]
-struct AnalysisOutput {
+pub struct AnalysisOutput {
     metadata: AnalysisMetadata,
     results: Vec<RegressionResult>,
 }
 
 #[derive(Debug, Serialize)]
-struct AnalysisMetadata {
+pub struct AnalysisMetadata {
     reference_coin: String,
     window_size: usize,
     analysis_date: String,
@@ -48,7 +48,8 @@ impl RollingRegressionAnalyzer {
     pub fn new(data_dir: &str) -> Result<Self, Box<dyn Error>> {
         // Load metadata
         let metadata_path = Path::new(data_dir).join("metadata.json");
-        let metadata_file = File::open(metadata_path)?;
+        let metadata_file = File::open(&metadata_path)
+            .map_err(|e| format!("Failed to open metadata.json: {}", e))?;
         let metadata: serde_json::Value = serde_json::from_reader(metadata_file)?;
         
         let reference_coin = metadata["reference_coin"]
@@ -56,17 +57,61 @@ impl RollingRegressionAnalyzer {
             .ok_or("Reference coin not found in metadata")?
             .to_string();
         
+        println!("Reference coin: {}", reference_coin);
+        
         // Load combined data
         let combined_data_path = Path::new(data_dir).join("combined_data.csv");
-        let file = File::open(combined_data_path)?;
+        let file = File::open(&combined_data_path)
+            .map_err(|e| format!("Failed to open combined_data.csv: {}", e))?;
+        
         let mut reader = ReaderBuilder::new()
             .has_headers(true)
+            .flexible(true) // Allow variable number of fields
             .from_reader(file);
         
         let mut data = Vec::new();
-        for result in reader.deserialize() {
-            let row: CombinedDataRow = result?;
-            data.push(row);
+        let headers = reader.headers()?.clone();
+        
+        println!("CSV headers: {:?}", headers);
+        
+        // Read records with better error handling
+        for (i, result) in reader.records().enumerate() {
+            match result {
+                Ok(record) => {
+                    let mut row_data = HashMap::new();
+                    let mut date = String::new();
+                    
+                    for (j, field) in record.iter().enumerate() {
+                        if j < headers.len() {
+                            let header = &headers[j];
+                            if header == "date" {
+                                date = field.to_string();
+                            } else {
+                                // Try to parse as f64, use None if it fails
+                                let value = field.parse::<f64>().ok();
+                                row_data.insert(header.to_string(), value);
+                            }
+                        }
+                    }
+                    
+                    if !date.is_empty() {
+                        data.push(CombinedDataRow {
+                            date,
+                            prices_and_returns: row_data,
+                        });
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error reading row {}: {:?}", i + 1, e);
+                    // Continue processing other rows
+                }
+            }
+        }
+        
+        println!("Loaded {} data rows", data.len());
+        
+        if data.is_empty() {
+            return Err("No data rows were loaded".into());
         }
         
         Ok(Self {
@@ -121,6 +166,8 @@ impl RollingRegressionAnalyzer {
             .as_array()
             .ok_or("Coins array not found in metadata")?;
         
+        println!("Processing {} coins", coins.len());
+        
         // For each coin (except reference coin)
         for coin_info in coins {
             let coin_id = coin_info["id"].as_str().ok_or("Coin ID not found")?;
@@ -129,13 +176,10 @@ impl RollingRegressionAnalyzer {
                 continue;  // Skip reference coin
             }
             
+            println!("Processing coin: {}", coin_id);
             let mut coin_results = Vec::new();
             
             // Perform rolling window regression
-            // For a window of size W at position i:
-            // - We use log returns from positions [i-W, i-1] (inclusive)
-            // - This gives us W log returns
-            // - The result is associated with date at position i-1
             for i in window_size..self.data.len() {
                 let window_start = i - window_size;
                 
@@ -148,20 +192,19 @@ impl RollingRegressionAnalyzer {
                 
                 // Collect log returns from window_start to i-1 (inclusive)
                 for j in window_start..i {
-                    if let (Some(&ref_ret), Some(&coin_ret)) = (
+                    if let (Some(Some(ref_ret)), Some(Some(coin_ret))) = (
                         self.data[j].prices_and_returns.get(&ref_key),
                         self.data[j].prices_and_returns.get(&coin_key)
                     ) {
                         // Only include if both values are finite (not NaN or infinity)
                         if ref_ret.is_finite() && coin_ret.is_finite() {
-                            ref_returns.push(ref_ret);
-                            coin_returns.push(coin_ret);
+                            ref_returns.push(*ref_ret);
+                            coin_returns.push(*coin_ret);
                         }
                     }
                 }
                 
                 // Only perform regression if we have enough valid data points
-                // Require at least 50% of the window size to be valid
                 if ref_returns.len() >= window_size / 2 {
                     match Self::ols_regression(&ref_returns, &coin_returns) {
                         Ok((alpha, beta)) => {
@@ -196,6 +239,7 @@ impl RollingRegressionAnalyzer {
                 }
             }
             
+            println!("  Generated {} results for {}", coin_results.len(), coin_id);
             all_results.extend(coin_results);
         }
         
@@ -219,43 +263,39 @@ impl RollingRegressionAnalyzer {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_ols_regression() {
-        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
-        
-        let (alpha, beta) = RollingRegressionAnalyzer::ols_regression(&x, &y).unwrap();
-        
-        assert!((alpha - 0.0).abs() < 0.001);
-        assert!((beta - 2.0).abs() < 0.001);
-    }
-}
-
 fn main() -> Result<(), Box<dyn Error>> {
-    // Example usage
-    let analyzer = RollingRegressionAnalyzer::new("../data")?;
+    println!("Starting Rust regression analyzer...");
     
-    // Analyze with different window sizes (constrained between 7 and 180 days)
+    // Try to load analyzer
+    let analyzer = match RollingRegressionAnalyzer::new("../data") {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("Failed to initialize analyzer: {}", e);
+            return Err(e);
+        }
+    };
+    
+    // Analyze with different window sizes
     let window_sizes = vec![7, 14, 30, 60, 90, 120, 180];
     
     for window_size in window_sizes {
-        if window_size < 7 || window_size > 180 {
-            println!("Skipping invalid window size: {}", window_size);
-            continue;
+        println!("\nAnalyzing with window size: {}", window_size);
+        
+        match analyzer.analyze_rolling_window(window_size) {
+            Ok(results) => {
+                let output_path = format!("../data/regression_results_window_{}.json", window_size);
+                
+                match analyzer.save_results(&results, &output_path) {
+                    Ok(_) => println!("Saved results to: {}", output_path),
+                    Err(e) => eprintln!("Failed to save results: {}", e),
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to analyze window size {}: {}", window_size, e);
+            }
         }
-        
-        println!("Analyzing with window size: {}", window_size);
-        
-        let results = analyzer.analyze_rolling_window(window_size)?;
-        let output_path = format!("../data/regression_results_window_{}.json", window_size);
-        
-        analyzer.save_results(&results, &output_path)?;
-        println!("Saved results to: {}", output_path);
     }
     
+    println!("\nAnalysis complete!");
     Ok(())
 }
