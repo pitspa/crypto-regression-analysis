@@ -154,7 +154,9 @@ jobs:
       with:
         name: analysis-results
         path: backend/data/*.json
-        retention-days: 7
+        retention-days: 1
+        compression-level: 0
+        overwrite: true
 
   deploy:
     needs: analyze-data
@@ -173,6 +175,16 @@ jobs:
       with:
         name: analysis-results
         path: frontend/data/
+      timeout-minutes: 5
+    
+    - name: Verify frontend structure
+      run: |
+        echo "Frontend directory structure:"
+        ls -la frontend/
+        echo "Frontend data directory:"
+        ls -la frontend/data/ || echo "No data directory yet"
+        echo "Creating data directory if needed:"
+        mkdir -p frontend/data
     
     - name: Setup Pages
       uses: actions/configure-pages@v3
