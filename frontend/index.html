@@ -695,9 +695,9 @@
                                             // Add hypothesis test interpretation
                                             if (dataKey === 'beta') {
                                                 if (lower > 1) {
-                                                    labels.push('⚠️ Significantly > 1 (higher volatility than BTC)');
+                                                    labels.push('⚠️ Significantly > 1 (high sensitivity to BTC returns)');
                                                 } else if (upper < 1) {
-                                                    labels.push('✓ Significantly < 1 (lower volatility than BTC)');
+                                                    labels.push('✓ Significantly < 1 (lower sensitivity to BTC returns)');
                                                 } else {
                                                     labels.push('↔️ Not significantly different from 1');
                                                 }
