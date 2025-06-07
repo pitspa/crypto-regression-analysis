@@ -806,7 +806,7 @@
             }
         }
 
-        // Create comparison chart
+        // Create comparison chart with confidence bands for both coins
         function createComparisonChart(container, data1, data2, dataKey, title, label1, label2, color1, color2) {
             const wrapper = document.createElement('div');
             wrapper.className = 'chart-wrapper';
@@ -821,13 +821,14 @@
             controls.className = 'chart-controls';
             controls.innerHTML = `
                 <button class="chart-control-btn" onclick="resetZoom('${dataKey}_comparison')">Reset Zoom</button>
+                <button class="chart-control-btn" onclick="toggleComparisonConfidenceBands('${dataKey}_comparison')">Toggle 90% CI</button>
             `;
             wrapper.appendChild(controls);
 
             // Add instructions
             const instructions = document.createElement('div');
             instructions.className = 'chart-instructions';
-            instructions.textContent = 'Scroll to zoom, drag to pan';
+            instructions.textContent = 'Scroll to zoom, drag to pan. Shaded areas show 90% confidence intervals.';
             wrapper.appendChild(instructions);
 
             const canvas = document.createElement('canvas');
@@ -855,43 +856,123 @@
                 minDate.setDate(minDate.getDate() - viewSize + 1);
             }
 
+            // Prepare datasets
+            const datasets = [];
+            
+            // Keys for confidence bands
+            const lowerKey = dataKey + '_lower_90';
+            const upperKey = dataKey + '_upper_90';
+            
+            // First coin's main line
+            datasets.push({
+                label: label1,
+                data: commonDates.map(date => {
+                    const point = validData1.find(d => d.date === date);
+                    return point ? point[dataKey] : null;
+                }),
+                borderColor: color1,
+                backgroundColor: color1 + '20',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 5,
+                tension: 0.1,
+                fill: false,
+                spanGaps: false
+            });
+
+            // Check if confidence bands are available for first coin
+            if (validData1.length > 0 && validData1[0][lowerKey] !== undefined) {
+                // Upper confidence band for first coin
+                datasets.push({
+                    label: label1 + ' Upper 90% CI',
+                    data: commonDates.map(date => {
+                        const point = validData1.find(d => d.date === date);
+                        return point ? point[upperKey] : null;
+                    }),
+                    borderColor: color1 + '40',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+                
+                // Lower confidence band for first coin (with fill)
+                datasets.push({
+                    label: label1 + ' Lower 90% CI',
+                    data: commonDates.map(date => {
+                        const point = validData1.find(d => d.date === date);
+                        return point ? point[lowerKey] : null;
+                    }),
+                    borderColor: color1 + '40',
+                    backgroundColor: color1 + '15',
+                    fill: '-1', // Fill to previous dataset (upper band)
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+            }
+
+            // Second coin's main line
+            datasets.push({
+                label: label2,
+                data: commonDates.map(date => {
+                    const point = validData2.find(d => d.date === date);
+                    return point ? point[dataKey] : null;
+                }),
+                borderColor: color2,
+                backgroundColor: color2 + '20',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 5,
+                tension: 0.1,
+                fill: false,
+                spanGaps: false
+            });
+
+            // Check if confidence bands are available for second coin
+            if (validData2.length > 0 && validData2[0][lowerKey] !== undefined) {
+                // Upper confidence band for second coin
+                datasets.push({
+                    label: label2 + ' Upper 90% CI',
+                    data: commonDates.map(date => {
+                        const point = validData2.find(d => d.date === date);
+                        return point ? point[upperKey] : null;
+                    }),
+                    borderColor: color2 + '40',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+                
+                // Lower confidence band for second coin (with fill)
+                datasets.push({
+                    label: label2 + ' Lower 90% CI',
+                    data: commonDates.map(date => {
+                        const point = validData2.find(d => d.date === date);
+                        return point ? point[lowerKey] : null;
+                    }),
+                    borderColor: color2 + '40',
+                    backgroundColor: color2 + '15',
+                    fill: '-1', // Fill to previous dataset (upper band)
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+            }
+
             const ctx = canvas.getContext('2d');
             const chart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: commonDates,
-                    datasets: [
-                        {
-                            label: label1,
-                            data: commonDates.map(date => {
-                                const point = validData1.find(d => d.date === date);
-                                return point ? point[dataKey] : null;
-                            }),
-                            borderColor: color1,
-                            backgroundColor: color1 + '20',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            pointHoverRadius: 5,
-                            tension: 0.1,
-                            fill: false,
-                            spanGaps: false
-                        },
-                        {
-                            label: label2,
-                            data: commonDates.map(date => {
-                                const point = validData2.find(d => d.date === date);
-                                return point ? point[dataKey] : null;
-                            }),
-                            borderColor: color2,
-                            backgroundColor: color2 + '20',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            pointHoverRadius: 5,
-                            tension: 0.1,
-                            fill: false,
-                            spanGaps: false
-                        }
-                    ]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
@@ -905,6 +986,10 @@
                             display: true,
                             position: 'top',
                             labels: {
+                                filter: function(item) {
+                                    // Only show main series in legend
+                                    return !item.text.includes('CI');
+                                },
                                 color: '#e0e0e0',
                                 padding: 15,
                                 font: {
@@ -920,7 +1005,76 @@
                             borderWidth: 1,
                             padding: 12,
                             displayColors: true,
+                            filter: function(tooltipItem) {
+                                // Only show tooltips for main datasets
+                                return !tooltipItem.dataset.label.includes('CI');
+                            },
                             callbacks: {
+                                afterLabel: function(context) {
+                                    // Add confidence interval info for main datasets
+                                    const datasetIndex = context.datasetIndex;
+                                    const dataIndex = context.dataIndex;
+                                    const labels = [];
+                                    
+                                    // For first coin
+                                    if (datasetIndex === 0 && validData1.length > 0 && validData1[0][lowerKey] !== undefined) {
+                                        const date = commonDates[dataIndex];
+                                        const point = validData1.find(d => d.date === date);
+                                        if (point) {
+                                            labels.push(`90% CI: [${point[lowerKey].toFixed(6)}, ${point[upperKey].toFixed(6)}]`);
+                                            
+                                            // Add interpretation
+                                            if (dataKey === 'beta') {
+                                                if (point[lowerKey] > 1) {
+                                                    labels.push('⚠️ Significantly > 1');
+                                                } else if (point[upperKey] < 1) {
+                                                    labels.push('✓ Significantly < 1');
+                                                } else {
+                                                    labels.push('↔️ Not significantly different from 1');
+                                                }
+                                            } else if (dataKey === 'alpha') {
+                                                if (point[lowerKey] > 0) {
+                                                    labels.push('✓ Significantly > 0');
+                                                } else if (point[upperKey] < 0) {
+                                                    labels.push('⚠️ Significantly < 0');
+                                                } else {
+                                                    labels.push('↔️ Not significantly different from 0');
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // For second coin (adjust index if confidence bands exist for first coin)
+                                    const secondCoinIndex = validData1.length > 0 && validData1[0][lowerKey] !== undefined ? 3 : 1;
+                                    if (datasetIndex === secondCoinIndex && validData2.length > 0 && validData2[0][lowerKey] !== undefined) {
+                                        const date = commonDates[dataIndex];
+                                        const point = validData2.find(d => d.date === date);
+                                        if (point) {
+                                            labels.push(`90% CI: [${point[lowerKey].toFixed(6)}, ${point[upperKey].toFixed(6)}]`);
+                                            
+                                            // Add interpretation
+                                            if (dataKey === 'beta') {
+                                                if (point[lowerKey] > 1) {
+                                                    labels.push('⚠️ Significantly > 1');
+                                                } else if (point[upperKey] < 1) {
+                                                    labels.push('✓ Significantly < 1');
+                                                } else {
+                                                    labels.push('↔️ Not significantly different from 1');
+                                                }
+                                            } else if (dataKey === 'alpha') {
+                                                if (point[lowerKey] > 0) {
+                                                    labels.push('✓ Significantly > 0');
+                                                } else if (point[upperKey] < 0) {
+                                                    labels.push('⚠️ Significantly < 0');
+                                                } else {
+                                                    labels.push('↔️ Not significantly different from 0');
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    return labels;
+                                },
                                 label: function(context) {
                                     if (context.parsed.y !== null) {
                                         return `${context.dataset.label}: ${context.parsed.y.toFixed(6)}`;
@@ -996,6 +1150,26 @@
             });
 
             charts[dataKey + '_comparison'] = chart;
+            
+            // Store the confidence band visibility state
+            chart.confidenceBandsVisible = true;
+        }
+
+        // Function to toggle confidence bands for comparison charts
+        window.toggleComparisonConfidenceBands = function(chartKey) {
+            const chart = charts[chartKey];
+            if (chart) {
+                chart.confidenceBandsVisible = !chart.confidenceBandsVisible;
+                
+                // Toggle visibility of all CI datasets
+                chart.data.datasets.forEach((dataset, index) => {
+                    if (dataset.label.includes('CI')) {
+                        chart.data.datasets[index].hidden = !chart.confidenceBandsVisible;
+                    }
+                });
+                
+                chart.update('none');
+            }
         }
 
         // Create price chart for single coin
