@@ -174,5 +174,5 @@ jobs:
     - name: Delete artifacts
       uses: geekyeggo/delete-artifact@v2
       with:
-        name: |
-          crypto-data
+        name: crypto-data
+      continue-on-error: true
