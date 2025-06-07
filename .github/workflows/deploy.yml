@@ -1,0 +1,159 @@
+name: Build and Deploy Crypto Analysis
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    # Run daily at 2 AM UTC to update crypto data
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  fetch-data:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install Python dependencies
+      run: |
+        cd backend/data_fetcher
+        pip install -r requirements.txt
+    
+    - name: Test CoinGecko connectivity
+      env:
+        COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+      run: |
+        cd backend/data_fetcher
+        python test_coingecko_api.py || echo "API test completed with warnings"
+    
+    - name: Fetch cryptocurrency data
+      env:
+        COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+      run: |
+        cd backend/data_fetcher
+        python fetch_crypto_data.py
+      continue-on-error: false
+      timeout-minutes: 10
+    
+    - name: Upload data artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: crypto-data
+        path: backend/data/
+        retention-days: 7
+    
+    - name: Check pipeline status
+      run: |
+        if [ -f "backend/data/pipeline_status.json" ]; then
+          echo "Pipeline status:"
+          cat backend/data/pipeline_status.json | jq '.'
+        else
+          echo "No pipeline status file found"
+          exit 1
+        fi
+
+  analyze-data:
+    needs: fetch-data
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download data artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: crypto-data
+        path: backend/data/
+    
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          backend/rust_analyzer/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build and run Rust analyzer
+      run: |
+        cd backend/data_fetcher
+        python rust_analyzer_wrapper.py
+    
+    - name: Verify analysis outputs
+      run: |
+        echo "Checking for expected output files..."
+        for window in 7 14 30 60 90 120 180; do
+          if [ -f "backend/data/regression_results_window_${window}.json" ]; then
+            echo "✓ Found regression_results_window_${window}.json"
+          else
+            echo "✗ Missing regression_results_window_${window}.json"
+            exit 1
+          fi
+        done
+        echo "All expected files found!"
+    
+    - name: Upload analysis results
+      uses: actions/upload-artifact@v3
+      with:
+        name: analysis-results
+        path: backend/data/*.json
+        retention-days: 7
+
+  deploy:
+    needs: analyze-data
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download analysis results
+      uses: actions/download-artifact@v3
+      with:
+        name: analysis-results
+        path: frontend/data/
+    
+    - name: Copy status page
+      run: |
+        cp backend/data_fetcher/status.html frontend/
+        echo "Status page copied to frontend/"
+    
+    - name: Setup Pages
+      uses: actions/configure-pages@v3
+    
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v2
+      with:
+        path: './frontend'
+    
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v2
+
+  cleanup:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Delete artifacts
+      uses: geekyeggo/delete-artifact@v2
+      with:
+        name: |
+          crypto-data
+          analysis-results

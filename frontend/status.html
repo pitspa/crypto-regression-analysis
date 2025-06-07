@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Status - Crypto Regression Analysis</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: #888;
+            margin-bottom: 30px;
+        }
+
+        .status-card {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #333;
+        }
+
+        .status-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .status-badge {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-success { background: #48bb78; color: #1a1a1a; }
+        .status-failed { background: #f56565; color: white; }
+        .status-running { background: #667eea; color: white; }
+        .status-warning { background: #ed8936; color: white; }
+
+        .step-grid {
+            display: grid;
+            gap: 15px;
+        }
+
+        .step-item {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #333;
+            transition: all 0.2s ease;
+        }
+
+        .step-item:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+
+        .step-info {
+            flex: 1;
+        }
+
+        .step-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .step-details {
+            font-size: 0.9em;
+            color: #888;
+        }
+
+        .step-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-icon {
+            font-size: 1.5em;
+        }
+
+        .timestamp {
+            font-size: 0.8em;
+            color: #666;
+        }
+
+        .error-section, .warning-section {
+            margin-top: 20px;
+        }
+
+        .error-item, .warning-item {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #f56565;
+        }
+
+        .warning-item {
+            border-left-color: #ed8936;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+        }
+
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s ease;
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .nav-link {
+            color: #667eea;
+            text-decoration: none;
+            margin-right: 20px;
+        }
+
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div>
+            <a href="index.html" class="nav-link">← Back to Analysis</a>
+        </div>
+        
+        <h1>Pipeline Status</h1>
+        <p class="subtitle">Data processing pipeline health and diagnostics</p>
+
+        <div id="statusContainer">
+            <div class="loading">Loading pipeline status...</div>
+        </div>
+    </div>
+
+    <script>
+        async function loadPipelineStatus() {
+            const container = document.getElementById('statusContainer');
+            
+            try {
+                const response = await fetch('./data/pipeline_status.json');
+                if (!response.ok) {
+                    throw new Error('Pipeline status not found');
+                }
+                
+                const status = await response.json();
+                displayStatus(status);
+                
+            } catch (error) {
+                container.innerHTML = `
+                    <div class="status-card">
+                        <div class="status-header">
+                            <h2>Pipeline Status</h2>
+                            <span class="status-badge status-warning">Unknown</span>
+                        </div>
+                        <p>Unable to load pipeline status. The pipeline may not have run yet.</p>
+                        <p style="margin-top: 10px; color: #888;">Error: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function displayStatus(status) {
+            const container = document.getElementById('statusContainer');
+            
+            // Overall status
+            const overallBadgeClass = status.overall_status === 'success' ? 'status-success' : 
+                                     status.overall_status === 'failed' ? 'status-failed' : 
+                                     status.overall_status === 'running' ? 'status-running' : 
+                                     'status-warning';
+            
+            let html = `
+                <div class="status-card">
+                    <div class="status-header">
+                        <div>
+                            <h2>Overall Pipeline Status</h2>
+                            <p class="timestamp">Last run: ${new Date(status.last_run).toLocaleString()}</p>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span class="status-badge ${overallBadgeClass}">${status.overall_status}</span>
+                            <button class="refresh-btn" onclick="location.reload()">Refresh</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Pipeline steps
+            html += '<div class="status-card"><h3>Pipeline Steps</h3><div class="step-grid">';
+            
+            const stepOrder = [
+                'initialization',
+                'fetch_top_coins',
+                'save_data',
+                'rust_build',
+                'rust_analysis'
+            ];
+            
+            // First show main steps
+            stepOrder.forEach(stepName => {
+                if (status.steps[stepName]) {
+                    html += createStepHTML(stepName, status.steps[stepName]);
+                }
+            });
+            
+            // Then show individual coin fetches
+            Object.entries(status.steps)
+                .filter(([name, _]) => name.startsWith('fetch_') && name !== 'fetch_top_coins')
+                .forEach(([stepName, stepData]) => {
+                    html += createStepHTML(stepName, stepData);
+                });
+            
+            html += '</div></div>';
+            
+            // Errors
+            if (status.errors && status.errors.length > 0) {
+                html += '<div class="status-card error-section">';
+                html += '<h3>Errors (' + status.errors.length + ')</h3>';
+                status.errors.forEach(error => {
+                    html += `
+                        <div class="error-item">
+                            <div class="step-name">${error.message}</div>
+                            <div class="step-details">Step: ${error.step || 'Unknown'}</div>
+                            <div class="timestamp">${new Date(error.timestamp).toLocaleString()}</div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+            
+            // Warnings
+            if (status.warnings && status.warnings.length > 0) {
+                html += '<div class="status-card warning-section">';
+                html += '<h3>Warnings (' + status.warnings.length + ')</h3>';
+                status.warnings.forEach(warning => {
+                    html += `
+                        <div class="warning-item">
+                            <div class="step-name">${warning.message}</div>
+                            <div class="timestamp">${new Date(warning.timestamp).toLocaleString()}</div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+            
+            container.innerHTML = html;
+        }
+
+        function createStepHTML(stepName, stepData) {
+            const statusIcon = stepData.status === 'success' ? '✓' : 
+                              stepData.status === 'failed' ? '✗' : 
+                              stepData.status === 'running' ? '⟳' : '•';
+            
+            const statusClass = stepData.status === 'success' ? 'status-success' : 
+                               stepData.status === 'failed' ? 'status-failed' : 
+                               stepData.status === 'running' ? 'status-running' : '';
+            
+            const displayName = stepName.replace(/_/g, ' ')
+                                      .replace(/fetch /g, '')
+                                      .replace(/\b\w/g, l => l.toUpperCase());
+            
+            return `
+                <div class="step-item">
+                    <div class="step-info">
+                        <div class="step-name">${displayName}</div>
+                        ${stepData.details ? `<div class="step-details">${stepData.details}</div>` : ''}
+                        ${stepData.error ? `<div class="step-details" style="color: #f56565;">${stepData.error}</div>` : ''}
+                    </div>
+                    <div class="step-status">
+                        <span class="status-icon ${statusClass}">${statusIcon}</span>
+                        <span class="timestamp">${new Date(stepData.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Load status on page load
+        window.addEventListener('load', loadPipelineStatus);
+        
+        // Auto-refresh every 30 seconds
+        setInterval(loadPipelineStatus, 30000);
+    </script>
+</body>
+</html>

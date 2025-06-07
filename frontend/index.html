@@ -1,0 +1,1638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Rolling Regression Analysis</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-moment/1.0.1/chartjs-adapter-moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammerjs/2.0.8/hammer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            padding: 40px 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 40px;
+        }
+
+        h1 {
+            font-size: 3em;
+            font-weight: 800;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 1.2em;
+            color: #888;
+            -webkit-text-fill-color: #888;
+        }
+
+        .controls {
+            background: #1a1a1a;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid #333;
+        }
+
+        .control-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .control-item {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 0.9em;
+            color: #aaa;
+            font-weight: 500;
+        }
+
+        select, button {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 10px;
+            color: #e0e0e0;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+
+        select:hover {
+            border-color: #667eea;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 12px 24px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .charts-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 40px;
+        }
+
+        .chart-wrapper {
+            background: #1a1a1a;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid #333;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chart-wrapper::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .chart-title {
+            font-size: 1.5em;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #e0e0e0;
+        }
+
+        .chart-controls {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .chart-control-btn {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #e0e0e0;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .chart-control-btn:hover {
+            background: #3a3a3a;
+            border-color: #667eea;
+        }
+
+        .chart-instructions {
+            position: absolute;
+            bottom: 10px;
+            right: 30px;
+            font-size: 0.75em;
+            color: #666;
+            font-style: italic;
+        }
+
+        canvas {
+            max-height: 400px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+            color: #667eea;
+        }
+
+        .error {
+            background: #2a1a1a;
+            border: 1px solid #f56565;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #f56565;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+
+        .stat-card {
+            background: #2a2a2a;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid #333;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            border-color: #667eea;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            line-height: 1.2;
+        }
+
+        .stat-value span {
+            display: block;
+            margin: 5px 0;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .loading-dots {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Cryptocurrency Rolling Regression Analysis</h1>
+            <p class="subtitle">Alpha & Beta Coefficients vs Bitcoin</p>
+            <div style="margin-top: 20px;">
+                <a href="status.html" style="color: #667eea; text-decoration: none; font-size: 0.9em;">
+                    View Pipeline Status →
+                </a>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <div class="control-item">
+                    <label for="coinSelect">Select Cryptocurrency</label>
+                    <select id="coinSelect">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                
+                <div class="control-item">
+                    <label for="comparisonMode">Comparison Mode</label>
+                    <select id="comparisonMode" onchange="toggleComparisonCoin()">
+                        <option value="single">Single Coin</option>
+                        <option value="compare">Compare Two Coins</option>
+                    </select>
+                </div>
+                
+                <div class="control-item" id="secondCoinContainer" style="display: none;">
+                    <label for="coinSelect2">Second Cryptocurrency</label>
+                    <select id="coinSelect2">
+                        <option value="">Select second coin...</option>
+                    </select>
+                </div>
+                
+                <div class="control-item">
+                    <label for="windowSize">Window Size (days)</label>
+                    <select id="windowSize">
+                        <option value="7">7 days (1 week)</option>
+                        <option value="14">14 days (2 weeks)</option>
+                        <option value="30" selected>30 days (1 month)</option>
+                        <option value="60">60 days (2 months)</option>
+                        <option value="90">90 days (3 months)</option>
+                        <option value="120">120 days (4 months)</option>
+                        <option value="180">180 days (6 months)</option>
+                    </select>
+                </div>
+                
+                <div class="control-item">
+                    <label for="chartType">Chart Type</label>
+                    <select id="chartType">
+                        <option value="both">Both Alpha & Beta</option>
+                        <option value="alpha">Alpha Only</option>
+                        <option value="beta">Beta Only</option>
+                    </select>
+                </div>
+            </div>
+            
+            <button id="loadData" onclick="loadAndDisplayData()">Load Data</button>
+        </div>
+
+        <div id="chartContainer" class="charts-container">
+            <div class="loading">
+                <span class="loading-dots">Select a cryptocurrency and click "Load Data" to begin analysis...</span>
+            </div>
+        </div>
+
+        <div id="statsContainer" class="stats-grid" style="display: none;">
+            <div class="stat-card">
+                <div class="stat-value" id="avgAlpha">-</div>
+                <div class="stat-label">Average Alpha</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avgBeta">-</div>
+                <div class="stat-label">Average Beta</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="validPoints">-</div>
+                <div class="stat-label">Valid Data Points</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="dataRange">-</div>
+                <div class="stat-label">Date Range</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let charts = {};
+        let currentCoinData = null;
+
+        // Chart.js default configuration
+        Chart.defaults.color = '#888';
+        Chart.defaults.borderColor = '#333';
+
+        // Initialize the application
+        async function init() {
+            try {
+                // Load metadata from the data directory
+                const metadataResponse = await fetch('./data/metadata.json');
+                if (!metadataResponse.ok) {
+                    throw new Error('Failed to load metadata. Data may not have been generated yet.');
+                }
+                
+                const metadata = await metadataResponse.json();
+                
+                // Populate coin selectors from real metadata
+                const coinSelect = document.getElementById('coinSelect');
+                const coinSelect2 = document.getElementById('coinSelect2');
+                
+                coinSelect.innerHTML = '<option value="">Select a coin...</option>';
+                coinSelect2.innerHTML = '<option value="">Select second coin...</option>';
+                
+                metadata.coins.forEach(coin => {
+                    if (coin.id !== metadata.reference_coin) {
+                        const option1 = document.createElement('option');
+                        option1.value = coin.id;
+                        option1.textContent = `${coin.name} (${coin.symbol})`;
+                        coinSelect.appendChild(option1);
+                        
+                        const option2 = document.createElement('option');
+                        option2.value = coin.id;
+                        option2.textContent = `${coin.name} (${coin.symbol})`;
+                        coinSelect2.appendChild(option2);
+                    }
+                });
+
+                // Store reference coin for price comparisons
+                window.referenceCoin = metadata.reference_coin;
+
+            } catch (error) {
+                console.error('Initialization error:', error);
+                showError('Failed to initialize application. Please ensure data has been generated and deployed.');
+                
+                // Disable the load button if initialization fails
+                document.getElementById('loadData').disabled = true;
+            }
+        }
+
+        // Toggle comparison coin selector
+        function toggleComparisonCoin() {
+            const mode = document.getElementById('comparisonMode').value;
+            const secondCoinContainer = document.getElementById('secondCoinContainer');
+            
+            if (mode === 'compare') {
+                secondCoinContainer.style.display = 'block';
+            } else {
+                secondCoinContainer.style.display = 'none';
+            }
+        }
+
+        // Load and display data
+        async function loadAndDisplayData() {
+            const coinId = document.getElementById('coinSelect').value;
+            const coinId2 = document.getElementById('coinSelect2').value;
+            const comparisonMode = document.getElementById('comparisonMode').value;
+            const windowSize = parseInt(document.getElementById('windowSize').value);
+            const chartType = document.getElementById('chartType').value;
+
+            if (!coinId) {
+                showError('Please select a cryptocurrency');
+                return;
+            }
+
+            if (comparisonMode === 'compare' && !coinId2) {
+                showError('Please select a second cryptocurrency for comparison');
+                return;
+            }
+
+            if (comparisonMode === 'compare' && coinId === coinId2) {
+                showError('Please select two different cryptocurrencies');
+                return;
+            }
+
+            // Validate window size
+            const validWindowSizes = [7, 14, 30, 60, 90, 120, 180];
+            if (!validWindowSizes.includes(windowSize)) {
+                showError('Invalid window size selected');
+                return;
+            }
+
+            // Show loading state
+            document.getElementById('chartContainer').innerHTML = '<div class="loading"><span class="loading-dots">Loading data...</span></div>';
+
+            try {
+                // Load real data
+                const dataFile = `./data/regression_results_window_${windowSize}.json`;
+                const response = await fetch(dataFile);
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to load regression data for window size ${windowSize}. Data may not have been generated for this window size.`);
+                }
+                
+                const analysisData = await response.json();
+                
+                if (comparisonMode === 'single') {
+                    // Filter data for selected coin
+                    const coinData = analysisData.results.filter(r => r.coin_id === coinId);
+                    
+                    if (coinData.length === 0) {
+                        throw new Error(`No analysis data available for ${coinId}`);
+                    }
+                    
+                    currentCoinData = coinData;
+                    await displayCharts(currentCoinData, chartType);
+                    updateStatistics(currentCoinData);
+                } else {
+                    // Filter data for both coins
+                    const coinData1 = analysisData.results.filter(r => r.coin_id === coinId);
+                    const coinData2 = analysisData.results.filter(r => r.coin_id === coinId2);
+                    
+                    if (coinData1.length === 0 && coinData2.length === 0) {
+                        throw new Error('No analysis data available for the selected coins');
+                    }
+                    
+                    await displayComparisonCharts(coinData1, coinData2, coinId, coinId2, chartType);
+                    updateComparisonStatistics(coinData1, coinData2, coinId, coinId2);
+                }
+
+                // Show stats container
+                document.getElementById('statsContainer').style.display = 'grid';
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                showError(error.message || 'Failed to load data. Please ensure the analysis has been run for the selected window size.');
+                document.getElementById('statsContainer').style.display = 'none';
+            }
+        }
+
+        // Display charts based on selected type
+        async function displayCharts(data, chartType) {
+            const container = document.getElementById('chartContainer');
+            container.innerHTML = '';
+
+            // Destroy existing charts
+            Object.values(charts).forEach(chart => chart.destroy());
+            charts = {};
+
+            // Get coin info for display
+            const coinId = document.getElementById('coinSelect').value;
+            const coinName = document.querySelector(`#coinSelect option[value="${coinId}"]`).textContent;
+
+            // Always show price chart first
+            await createPriceChart(container, coinId, coinName);
+
+            // Then show coefficient charts based on selection
+            if (chartType === 'both' || chartType === 'alpha') {
+                createChart(container, data, 'alpha', 'Alpha Coefficient', '#667eea');
+            }
+
+            if (chartType === 'both' || chartType === 'beta') {
+                createChart(container, data, 'beta', 'Beta Coefficient', '#764ba2');
+            }
+        }
+
+        // Display comparison charts
+        async function displayComparisonCharts(data1, data2, coinId1, coinId2, chartType) {
+            const container = document.getElementById('chartContainer');
+            container.innerHTML = '';
+
+            // Destroy existing charts
+            Object.values(charts).forEach(chart => chart.destroy());
+            charts = {};
+
+            // Get coin names for labels
+            const coin1Name = document.querySelector(`#coinSelect option[value="${coinId1}"]`).textContent;
+            const coin2Name = document.querySelector(`#coinSelect option[value="${coinId2}"]`).textContent;
+
+            // Always show price comparison chart first
+            await createPriceComparisonChart(container, coinId1, coinId2, coin1Name, coin2Name);
+
+            // Then show coefficient charts
+            if (chartType === 'both' || chartType === 'alpha') {
+                createComparisonChart(container, data1, data2, 'alpha', 'Alpha Coefficient Comparison', 
+                                    coin1Name, coin2Name, '#667eea', '#e53e3e');
+            }
+
+            if (chartType === 'both' || chartType === 'beta') {
+                createComparisonChart(container, data1, data2, 'beta', 'Beta Coefficient Comparison', 
+                                    coin1Name, coin2Name, '#764ba2', '#dd6b20');
+            }
+        }
+
+        // Create individual chart
+        function createChart(container, data, dataKey, title, color) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+
+            const titleElem = document.createElement('h3');
+            titleElem.className = 'chart-title';
+            titleElem.textContent = title;
+            wrapper.appendChild(titleElem);
+
+            // Add chart controls
+            const controls = document.createElement('div');
+            controls.className = 'chart-controls';
+            controls.innerHTML = `
+                <button class="chart-control-btn" onclick="resetZoom('${dataKey}')">Reset Zoom</button>
+            `;
+            wrapper.appendChild(controls);
+
+            // Add instructions
+            const instructions = document.createElement('div');
+            instructions.className = 'chart-instructions';
+            instructions.textContent = 'Scroll to zoom, drag to pan';
+            wrapper.appendChild(instructions);
+
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            // Filter out null values for display
+            const validData = data.filter(d => d[dataKey] !== null);
+
+            // Calculate viewing window
+            const windowSize = parseInt(document.getElementById('windowSize').value);
+            const viewSize = Math.max(windowSize, 30);
+            
+            // Get the latest date and calculate the initial viewing range
+            let minDate, maxDate;
+            if (validData.length > 0) {
+                const dates = validData.map(d => new Date(d.date));
+                maxDate = new Date(Math.max(...dates));
+                minDate = new Date(maxDate);
+                minDate.setDate(minDate.getDate() - viewSize + 1);
+            }
+
+            const ctx = canvas.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: validData.map(d => d.date),
+                    datasets: [{
+                        label: title,
+                        data: validData.map(d => d[dataKey]),
+                        borderColor: color,
+                        backgroundColor: color + '20',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 5,
+                        tension: 0.1,
+                        fill: true,
+                        spanGaps: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                            titleColor: '#e0e0e0',
+                            bodyColor: '#e0e0e0',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                            padding: 12,
+                            displayColors: false,
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.parsed.y;
+                                    return `${title}: ${value.toFixed(6)}`;
+                                }
+                            }
+                        },
+                        zoom: {
+                            limits: {
+                                x: {
+                                    min: 'original',
+                                    max: 'original'
+                                },
+                                y: {
+                                    min: 'original',
+                                    max: 'original'
+                                }
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: null,
+                                onPanComplete: function({chart}) {
+                                    // Optional: Update something when pan completes
+                                }
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                drag: {
+                                    enabled: false
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x',
+                                onZoomComplete: function({chart}) {
+                                    // Optional: Update something when zoom completes
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM DD'
+                                }
+                            },
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                maxRotation: 45,
+                                minRotation: 0
+                            },
+                            min: minDate,
+                            max: maxDate
+                        },
+                        y: {
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                callback: function(value) {
+                                    return value.toFixed(4);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            charts[dataKey] = chart;
+        }
+
+        // Create comparison chart
+        function createComparisonChart(container, data1, data2, dataKey, title, label1, label2, color1, color2) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+
+            const titleElem = document.createElement('h3');
+            titleElem.className = 'chart-title';
+            titleElem.textContent = title;
+            wrapper.appendChild(titleElem);
+
+            // Add chart controls
+            const controls = document.createElement('div');
+            controls.className = 'chart-controls';
+            controls.innerHTML = `
+                <button class="chart-control-btn" onclick="resetZoom('${dataKey}_comparison')">Reset Zoom</button>
+            `;
+            wrapper.appendChild(controls);
+
+            // Add instructions
+            const instructions = document.createElement('div');
+            instructions.className = 'chart-instructions';
+            instructions.textContent = 'Scroll to zoom, drag to pan';
+            wrapper.appendChild(instructions);
+
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            // Filter out null values and align dates
+            const validData1 = data1.filter(d => d[dataKey] !== null);
+            const validData2 = data2.filter(d => d[dataKey] !== null);
+
+            // Find common date range
+            const dates1 = new Set(validData1.map(d => d.date));
+            const dates2 = new Set(validData2.map(d => d.date));
+            const commonDates = [...dates1].filter(date => dates2.has(date)).sort();
+
+            // Calculate viewing window
+            const windowSize = parseInt(document.getElementById('windowSize').value);
+            const viewSize = Math.max(windowSize, 30);
+            
+            // Get the latest date and calculate the initial viewing range
+            let minDate, maxDate;
+            if (commonDates.length > 0) {
+                maxDate = new Date(commonDates[commonDates.length - 1]);
+                minDate = new Date(maxDate);
+                minDate.setDate(minDate.getDate() - viewSize + 1);
+            }
+
+            const ctx = canvas.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: commonDates,
+                    datasets: [
+                        {
+                            label: label1,
+                            data: commonDates.map(date => {
+                                const point = validData1.find(d => d.date === date);
+                                return point ? point[dataKey] : null;
+                            }),
+                            borderColor: color1,
+                            backgroundColor: color1 + '20',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                            tension: 0.1,
+                            fill: false,
+                            spanGaps: false
+                        },
+                        {
+                            label: label2,
+                            data: commonDates.map(date => {
+                                const point = validData2.find(d => d.date === date);
+                                return point ? point[dataKey] : null;
+                            }),
+                            borderColor: color2,
+                            backgroundColor: color2 + '20',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                            tension: 0.1,
+                            fill: false,
+                            spanGaps: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#e0e0e0',
+                                padding: 15,
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                            titleColor: '#e0e0e0',
+                            bodyColor: '#e0e0e0',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                            padding: 12,
+                            displayColors: true,
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.parsed.y !== null) {
+                                        return `${context.dataset.label}: ${context.parsed.y.toFixed(6)}`;
+                                    }
+                                    return `${context.dataset.label}: No data`;
+                                }
+                            }
+                        },
+                        zoom: {
+                            limits: {
+                                x: {
+                                    min: 'original',
+                                    max: 'original'
+                                },
+                                y: {
+                                    min: 'original',
+                                    max: 'original'
+                                }
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: null
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                drag: {
+                                    enabled: false
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM DD'
+                                }
+                            },
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                maxRotation: 45,
+                                minRotation: 0
+                            },
+                            min: minDate,
+                            max: maxDate
+                        },
+                        y: {
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                callback: function(value) {
+                                    return value.toFixed(4);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            charts[dataKey + '_comparison'] = chart;
+        }
+
+        // Create price chart for single coin
+        async function createPriceChart(container, coinId, coinName) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+
+            const titleElem = document.createElement('h3');
+            titleElem.className = 'chart-title';
+            titleElem.textContent = 'Price Comparison';
+            wrapper.appendChild(titleElem);
+
+            // Add chart controls
+            const controls = document.createElement('div');
+            controls.className = 'chart-controls';
+            controls.innerHTML = `
+                <button class="chart-control-btn" onclick="resetZoom('price')">Reset Zoom</button>
+            `;
+            wrapper.appendChild(controls);
+
+            // Add instructions
+            const instructions = document.createElement('div');
+            instructions.className = 'chart-instructions';
+            instructions.textContent = 'Scroll to zoom, drag to pan';
+            wrapper.appendChild(instructions);
+
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            try {
+                // Load combined data CSV
+                const response = await fetch('./data/combined_data.csv');
+                if (!response.ok) {
+                    throw new Error('Price data not available');
+                }
+                
+                const csvText = await response.text();
+                const lines = csvText.trim().split('\n');
+                const headers = lines[0].split(',');
+                
+                // Find column indices
+                const dateIdx = headers.indexOf('date');
+                const coinPriceIdx = headers.indexOf(`${coinId}_price`);
+                const btcPriceIdx = headers.indexOf(`${window.referenceCoin || 'bitcoin'}_price`);
+                
+                if (dateIdx === -1 || coinPriceIdx === -1 || btcPriceIdx === -1) {
+                    throw new Error('Required price data columns not found');
+                }
+                
+                // Parse data
+                const dates = [];
+                const coinPrices = [];
+                const btcPrices = [];
+                
+                for (let i = 1; i < lines.length; i++) {
+                    const values = lines[i].split(',');
+                    const coinPrice = parseFloat(values[coinPriceIdx]);
+                    const btcPrice = parseFloat(values[btcPriceIdx]);
+                    
+                    if (!isNaN(coinPrice) && !isNaN(btcPrice)) {
+                        dates.push(values[dateIdx]);
+                        coinPrices.push(coinPrice);
+                        btcPrices.push(btcPrice);
+                    }
+                }
+                
+                if (dates.length === 0) {
+                    throw new Error('No valid price data found');
+                }
+
+                // Calculate viewing window
+                const windowSize = parseInt(document.getElementById('windowSize').value);
+                const viewSize = Math.max(windowSize, 30);
+                
+                let minDate, maxDate;
+                if (dates.length > 0) {
+                    maxDate = new Date(dates[dates.length - 1]);
+                    minDate = new Date(maxDate);
+                    minDate.setDate(minDate.getDate() - viewSize + 1);
+                }
+
+                const ctx = canvas.getContext('2d');
+                const chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: dates,
+                        datasets: [
+                            {
+                                label: coinName,
+                                data: coinPrices,
+                                borderColor: '#667eea',
+                                backgroundColor: '#667eea20',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                pointHoverRadius: 5,
+                                tension: 0.1,
+                                fill: false,
+                                yAxisID: 'y-coin'
+                            },
+                            {
+                                label: 'Bitcoin (BTC)',
+                                data: btcPrices,
+                                borderColor: '#f7931a',
+                                backgroundColor: '#f7931a20',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                pointHoverRadius: 5,
+                                tension: 0.1,
+                                fill: false,
+                                yAxisID: 'y-btc'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top',
+                                labels: {
+                                    color: '#e0e0e0',
+                                    padding: 15,
+                                    font: {
+                                        size: 12
+                                    }
+                                }
+                            },
+                            tooltip: {
+                                backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                                titleColor: '#e0e0e0',
+                                bodyColor: '#e0e0e0',
+                                borderColor: '#333',
+                                borderWidth: 1,
+                                padding: 12,
+                                displayColors: true,
+                                callbacks: {
+                                    label: function(context) {
+                                        return `${context.dataset.label}: $${context.parsed.y.toLocaleString(undefined, {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2
+                                        })}`;
+                                    }
+                                }
+                            },
+                            zoom: {
+                                limits: {
+                                    x: {
+                                        min: 'original',
+                                        max: 'original'
+                                    }
+                                },
+                                pan: {
+                                    enabled: true,
+                                    mode: 'x',
+                                    modifierKey: null
+                                },
+                                zoom: {
+                                    wheel: {
+                                        enabled: true,
+                                        speed: 0.1
+                                    },
+                                    drag: {
+                                        enabled: false
+                                    },
+                                    pinch: {
+                                        enabled: true
+                                    },
+                                    mode: 'x'
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'day',
+                                    displayFormats: {
+                                        day: 'MMM DD'
+                                    }
+                                },
+                                grid: {
+                                    color: '#2a2a2a'
+                                },
+                                ticks: {
+                                    color: '#888',
+                                    maxRotation: 45,
+                                    minRotation: 0
+                                },
+                                min: minDate,
+                                max: maxDate
+                            },
+                            'y-coin': {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                grid: {
+                                    color: '#2a2a2a'
+                                },
+                                ticks: {
+                                    color: '#667eea',
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: coinName.split(' ')[0] + ' Price (USD)',
+                                    color: '#667eea'
+                                }
+                            },
+                            'y-btc': {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                grid: {
+                                    drawOnChartArea: false
+                                },
+                                ticks: {
+                                    color: '#f7931a',
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Bitcoin Price (USD)',
+                                    color: '#f7931a'
+                                }
+                            }
+                        }
+                    }
+                });
+
+                charts['price'] = chart;
+                
+            } catch (error) {
+                console.error('Error loading price data:', error);
+                wrapper.innerHTML += `<p style="text-align: center; color: #888; margin-top: 20px;">Price data not available: ${error.message}</p>`;
+            }
+        }
+
+        // Create price comparison chart for two coins
+        async function createPriceComparisonChart(container, coinId1, coinId2, coin1Name, coin2Name) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+
+            const titleElem = document.createElement('h3');
+            titleElem.className = 'chart-title';
+            titleElem.textContent = 'Price Comparison with Bitcoin';
+            wrapper.appendChild(titleElem);
+
+            // Add chart controls
+            const controls = document.createElement('div');
+            controls.className = 'chart-controls';
+            controls.innerHTML = `
+                <button class="chart-control-btn" onclick="resetZoom('price_comparison')">Reset Zoom</button>
+            `;
+            wrapper.appendChild(controls);
+
+            // Add instructions
+            const instructions = document.createElement('div');
+            instructions.className = 'chart-instructions';
+            instructions.textContent = 'Scroll to zoom, drag to pan';
+            wrapper.appendChild(instructions);
+
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            try {
+                // Load combined data CSV
+                const response = await fetch('./data/combined_data.csv');
+                if (!response.ok) {
+                    throw new Error('Price data not available');
+                }
+                
+                const csvText = await response.text();
+                const lines = csvText.trim().split('\n');
+                const headers = lines[0].split(',');
+                
+                // Find column indices
+                const dateIdx = headers.indexOf('date');
+                const coin1PriceIdx = headers.indexOf(`${coinId1}_price`);
+                const coin2PriceIdx = headers.indexOf(`${coinId2}_price`);
+                const btcPriceIdx = headers.indexOf(`${window.referenceCoin || 'bitcoin'}_price`);
+                
+                if (dateIdx === -1 || coin1PriceIdx === -1 || coin2PriceIdx === -1 || btcPriceIdx === -1) {
+                    throw new Error('Required price data columns not found');
+                }
+                
+                // Parse data
+                const dates = [];
+                const coin1Prices = [];
+                const coin2Prices = [];
+                const btcPrices = [];
+                
+                for (let i = 1; i < lines.length; i++) {
+                    const values = lines[i].split(',');
+                    const coin1Price = parseFloat(values[coin1PriceIdx]);
+                    const coin2Price = parseFloat(values[coin2PriceIdx]);
+                    const btcPrice = parseFloat(values[btcPriceIdx]);
+                    
+                    if (!isNaN(coin1Price) && !isNaN(coin2Price) && !isNaN(btcPrice)) {
+                        dates.push(values[dateIdx]);
+                        coin1Prices.push(coin1Price);
+                        coin2Prices.push(coin2Price);
+                        btcPrices.push(btcPrice);
+                    }
+                }
+                
+                if (dates.length === 0) {
+                    throw new Error('No valid price data found');
+                }
+
+                // Calculate viewing window
+                const windowSize = parseInt(document.getElementById('windowSize').value);
+                const viewSize = Math.max(windowSize, 30);
+                
+                let minDate, maxDate;
+                if (dates.length > 0) {
+                    maxDate = new Date(dates[dates.length - 1]);
+                    minDate = new Date(maxDate);
+                    minDate.setDate(minDate.getDate() - viewSize + 1);
+                }
+
+                // Normalize prices to percentage change from start
+                const normalizeButton = document.createElement('button');
+                normalizeButton.className = 'chart-control-btn';
+                normalizeButton.textContent = 'Toggle Normalize';
+                normalizeButton.style.marginLeft = '10px';
+                controls.appendChild(normalizeButton);
+
+                let normalized = false;
+                
+                const createDatasets = () => {
+                    if (normalized) {
+                        // Calculate percentage changes from first common date
+                        const base1 = coin1Prices[0];
+                        const base2 = coin2Prices[0];
+                        const baseBtc = btcPrices[0];
+                        
+                        return [
+                            {
+                                label: coin1Name.split(' ')[0] + ' (% change)',
+                                data: coin1Prices.map(p => ((p / base1 - 1) * 100)),
+                                borderColor: '#667eea',
+                                backgroundColor: '#667eea20',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                pointHoverRadius: 5,
+                                tension: 0.1,
+                                fill: false
+                            },
+                            {
+                                label: coin2Name.split(' ')[0] + ' (% change)',
+                                data: coin2Prices.map(p => ((p / base2 - 1) * 100)),
+                                borderColor: '#e53e3e',
+                                backgroundColor: '#e53e3e20',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                pointHoverRadius: 5,
+                                tension: 0.1,
+                                fill: false
+                            },
+                            {
+                                label: 'Bitcoin (% change)',
+                                data: btcPrices.map(p => ((p / baseBtc - 1) * 100)),
+                                borderColor: '#f7931a',
+                                backgroundColor: '#f7931a20',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                pointHoverRadius: 5,
+                                tension: 0.1,
+                                fill: false,
+                                borderDash: [5, 5]
+                            }
+                        ];
+                    } else {
+                        return [
+                            {
+                                label: coin1Name.split(' ')[0],
+                                data: coin1Prices,
+                                borderColor: '#667eea',
+                                backgroundColor: '#667eea20',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                pointHoverRadius: 5,
+                                tension: 0.1,
+                                fill: false,
+                                yAxisID: 'y-coin1'
+                            },
+                            {
+                                label: coin2Name.split(' ')[0],
+                                data: coin2Prices,
+                                borderColor: '#e53e3e',
+                                backgroundColor: '#e53e3e20',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                pointHoverRadius: 5,
+                                tension: 0.1,
+                                fill: false,
+                                yAxisID: 'y-coin2'
+                            },
+                            {
+                                label: 'Bitcoin',
+                                data: btcPrices,
+                                borderColor: '#f7931a',
+                                backgroundColor: '#f7931a20',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                pointHoverRadius: 5,
+                                tension: 0.1,
+                                fill: false,
+                                yAxisID: 'y-btc',
+                                borderDash: [5, 5]
+                            }
+                        ];
+                    }
+                };
+
+                const ctx = canvas.getContext('2d');
+                const chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: dates,
+                        datasets: createDatasets()
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top',
+                                labels: {
+                                    color: '#e0e0e0',
+                                    padding: 15,
+                                    font: {
+                                        size: 12
+                                    }
+                                }
+                            },
+                            tooltip: {
+                                backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                                titleColor: '#e0e0e0',
+                                bodyColor: '#e0e0e0',
+                                borderColor: '#333',
+                                borderWidth: 1,
+                                padding: 12,
+                                displayColors: true,
+                                callbacks: {
+                                    label: function(context) {
+                                        if (normalized) {
+                                            return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}%`;
+                                        } else {
+                                            return `${context.dataset.label}: $${context.parsed.y.toLocaleString(undefined, {
+                                                minimumFractionDigits: 2,
+                                                maximumFractionDigits: 2
+                                            })}`;
+                                        }
+                                    }
+                                }
+                            },
+                            zoom: {
+                                limits: {
+                                    x: {
+                                        min: 'original',
+                                        max: 'original'
+                                    }
+                                },
+                                pan: {
+                                    enabled: true,
+                                    mode: 'x',
+                                    modifierKey: null
+                                },
+                                zoom: {
+                                    wheel: {
+                                        enabled: true,
+                                        speed: 0.1
+                                    },
+                                    drag: {
+                                        enabled: false
+                                    },
+                                    pinch: {
+                                        enabled: true
+                                    },
+                                    mode: 'x'
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'day',
+                                    displayFormats: {
+                                        day: 'MMM DD'
+                                    }
+                                },
+                                grid: {
+                                    color: '#2a2a2a'
+                                },
+                                ticks: {
+                                    color: '#888',
+                                    maxRotation: 45,
+                                    minRotation: 0
+                                },
+                                min: minDate,
+                                max: maxDate
+                            }
+                        }
+                    }
+                });
+
+                // Update scales based on normalization
+                const updateScales = () => {
+                    if (normalized) {
+                        chart.options.scales = {
+                            ...chart.options.scales,
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                grid: {
+                                    color: '#2a2a2a'
+                                },
+                                ticks: {
+                                    color: '#888',
+                                    callback: function(value) {
+                                        return value.toFixed(0) + '%';
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Percentage Change (%)',
+                                    color: '#888'
+                                }
+                            }
+                        };
+                        delete chart.options.scales['y-coin1'];
+                        delete chart.options.scales['y-coin2'];
+                        delete chart.options.scales['y-btc'];
+                    } else {
+                        chart.options.scales = {
+                            ...chart.options.scales,
+                            'y-coin1': {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                grid: {
+                                    color: '#2a2a2a'
+                                },
+                                ticks: {
+                                    color: '#667eea',
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: coin1Name.split(' ')[0] + ' (USD)',
+                                    color: '#667eea'
+                                }
+                            },
+                            'y-coin2': {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                grid: {
+                                    drawOnChartArea: false
+                                },
+                                ticks: {
+                                    color: '#e53e3e',
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: coin2Name.split(' ')[0] + ' (USD)',
+                                    color: '#e53e3e'
+                                }
+                            },
+                            'y-btc': {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                grid: {
+                                    drawOnChartArea: false
+                                },
+                                ticks: {
+                                    color: '#f7931a',
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Bitcoin (USD)',
+                                    color: '#f7931a'
+                                }
+                            }
+                        };
+                        delete chart.options.scales.y;
+                    }
+                };
+
+                updateScales();
+
+                normalizeButton.onclick = () => {
+                    normalized = !normalized;
+                    chart.data.datasets = createDatasets();
+                    updateScales();
+                    chart.update('none');
+                };
+
+                charts['price_comparison'] = chart;
+                
+            } catch (error) {
+                console.error('Error loading price data:', error);
+                wrapper.innerHTML += `<p style="text-align: center; color: #888; margin-top: 20px;">Price data not available: ${error.message}</p>`;
+            }
+        }
+
+        // Update statistics
+        function updateStatistics(data) {
+            if (!data || data.length === 0) return;
+
+            // Filter out null values
+            const validData = data.filter(d => d.alpha !== null && d.beta !== null);
+            
+            if (validData.length === 0) {
+                document.getElementById('avgAlpha').textContent = 'N/A';
+                document.getElementById('avgBeta').textContent = 'N/A';
+                document.getElementById('validPoints').textContent = '0';
+                document.getElementById('dataRange').textContent = 'No data';
+                return;
+            }
+
+            const avgAlpha = validData.reduce((sum, d) => sum + d.alpha, 0) / validData.length;
+            const avgBeta = validData.reduce((sum, d) => sum + d.beta, 0) / validData.length;
+
+            // Find date range of valid data
+            const dates = validData.map(d => new Date(d.date));
+            const minDate = new Date(Math.min(...dates));
+            const maxDate = new Date(Math.max(...dates));
+            const dateRange = `${minDate.toLocaleDateString()} - ${maxDate.toLocaleDateString()}`;
+
+            document.getElementById('avgAlpha').textContent = avgAlpha.toFixed(6);
+            document.getElementById('avgBeta').textContent = avgBeta.toFixed(4);
+            document.getElementById('validPoints').textContent = validData.length.toLocaleString();
+            document.getElementById('dataRange').textContent = dateRange;
+        }
+
+        // Update comparison statistics
+        function updateComparisonStatistics(data1, data2, coinId1, coinId2) {
+            // Get coin names
+            const coin1Name = document.querySelector(`#coinSelect option[value="${coinId1}"]`).textContent.split(' ')[0];
+            const coin2Name = document.querySelector(`#coinSelect option[value="${coinId2}"]`).textContent.split(' ')[0];
+
+            // Calculate statistics for both coins
+            const validData1 = data1.filter(d => d.alpha !== null && d.beta !== null);
+            const validData2 = data2.filter(d => d.alpha !== null && d.beta !== null);
+
+            if (validData1.length === 0 && validData2.length === 0) {
+                document.getElementById('avgAlpha').textContent = 'N/A';
+                document.getElementById('avgBeta').textContent = 'N/A';
+                document.getElementById('validPoints').textContent = '0';
+                document.getElementById('dataRange').textContent = 'No data';
+                return;
+            }
+
+            // Calculate averages
+            const avgAlpha1 = validData1.length > 0 ? 
+                validData1.reduce((sum, d) => sum + d.alpha, 0) / validData1.length : 0;
+            const avgAlpha2 = validData2.length > 0 ? 
+                validData2.reduce((sum, d) => sum + d.alpha, 0) / validData2.length : 0;
+            
+            const avgBeta1 = validData1.length > 0 ? 
+                validData1.reduce((sum, d) => sum + d.beta, 0) / validData1.length : 0;
+            const avgBeta2 = validData2.length > 0 ? 
+                validData2.reduce((sum, d) => sum + d.beta, 0) / validData2.length : 0;
+
+            // Update display with comparison format
+            document.getElementById('avgAlpha').innerHTML = 
+                `<span style="font-size: 0.8em">${coin1Name}: ${avgAlpha1.toFixed(6)}<br>${coin2Name}: ${avgAlpha2.toFixed(6)}</span>`;
+            document.getElementById('avgBeta').innerHTML = 
+                `<span style="font-size: 0.8em">${coin1Name}: ${avgBeta1.toFixed(4)}<br>${coin2Name}: ${avgBeta2.toFixed(4)}</span>`;
+            
+            // Combined valid points
+            document.getElementById('validPoints').innerHTML = 
+                `<span style="font-size: 0.8em">${coin1Name}: ${validData1.length}<br>${coin2Name}: ${validData2.length}</span>`;
+            
+            // Find common date range
+            const allDates = [
+                ...validData1.map(d => new Date(d.date)),
+                ...validData2.map(d => new Date(d.date))
+            ];
+            if (allDates.length > 0) {
+                const minDate = new Date(Math.min(...allDates));
+                const maxDate = new Date(Math.max(...allDates));
+                document.getElementById('dataRange').textContent = 
+                    `${minDate.toLocaleDateString()} - ${maxDate.toLocaleDateString()}`;
+            } else {
+                document.getElementById('dataRange').textContent = 'No data';
+            }
+        }
+
+        // Reset zoom function
+        function resetZoom(chartKey) {
+            if (charts[chartKey]) {
+                charts[chartKey].resetZoom();
+            }
+        }
+
+        // Show error message
+        function showError(message) {
+            const container = document.getElementById('chartContainer');
+            container.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
