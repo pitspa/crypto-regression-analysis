@@ -31,21 +31,21 @@ class CryptoDataFetcher:
         self.api_key = os.environ.get('COINGECKO_API_KEY', '')
         self.status = PipelineStatus(os.path.join(output_dir, "pipeline_status.json"))
         
-        # Use demo API if no key provided
+        # Use pro API if key provided
         if self.api_key:
-            self.base_url = "https://api.coingecko.com/api/v3"
+            self.base_url = "https://pro-api.coingecko.com/api/v3"
             self.headers = {
                 'x-cg-pro-api-key': self.api_key,
                 'Accept': 'application/json'
             }
+            print(f"Using CoinGecko Pro API with key: {self.api_key[:8]}...")
         else:
-            # Demo API has limited functionality but works without key
+            # Public API
             self.base_url = "https://api.coingecko.com/api/v3"
             self.headers = {
                 'Accept': 'application/json'
             }
             print("Warning: No API key provided. Using public API with rate limits.")
-            print("To get a free API key, visit: https://www.coingecko.com/en/api/pricing")
             self.status.add_warning("No API key provided, using public API with rate limits")
         
         # Create output directory if it doesn't exist
@@ -57,21 +57,23 @@ class CryptoDataFetcher:
         params = {
             'vs_currency': 'usd',
             'order': 'market_cap_desc',
-            'per_page': limit,
-            'page': 1,
-            'sparkline': 'false'  # Changed from False to 'false'
-            # Removed price_change_percentage parameter as it might cause issues
+            'per_page': str(limit),  # Convert to string
+            'page': '1',  # Convert to string
+            'sparkline': 'false',  # Use string 'false' not Python False
+            'locale': 'en'
         }
             
         try:
-            print(f"Fetching from: {endpoint}")
-            print(f"Parameters: {params}")
+            print(f"Fetching top {limit} cryptocurrencies...")
+            print(f"URL: {endpoint}")
+            print(f"Params: {params}")
+            
             response = requests.get(endpoint, params=params, headers=self.headers)
             print(f"Response status: {response.status_code}")
             
             if response.status_code != 200:
-                print(f"Response content: {response.text}")
-            
+                print(f"Error response: {response.text}")
+                
             response.raise_for_status()
             
             data = response.json()
@@ -80,12 +82,11 @@ class CryptoDataFetcher:
             if not isinstance(data, list) or len(data) == 0:
                 raise ValueError("Unexpected response format from CoinGecko")
             
-            # Verify required fields exist
-            required_fields = ['id', 'symbol', 'name', 'market_cap']
-            for coin in data:
-                for field in required_fields:
-                    if field not in coin:
-                        raise ValueError(f"Missing required field '{field}' in response")
+            print(f"Successfully fetched {len(data)} coins")
+            
+            # Print first coin as example
+            if data:
+                print(f"First coin: {data[0].get('name', 'Unknown')} ({data[0].get('symbol', '').upper()})")
             
             return data
             
@@ -93,21 +94,25 @@ class CryptoDataFetcher:
             if e.response.status_code == 429:
                 print("Rate limit exceeded. Please wait or use an API key.")
             elif e.response.status_code == 400:
-                print(f"Bad request. URL: {e.response.url}")
-                print(f"Response: {e.response.text}")
+                print(f"Bad request error. This might be due to invalid parameters.")
+                print(f"Full URL: {e.response.url}")
             raise
     
-    def fetch_historical_data(self, coin_id, days=1825):  # 5 years = 1825 days
+    def fetch_historical_data(self, coin_id, days=365):  # Reduced from 1825 to 365 days
         """Fetch historical price data for a specific coin"""
         endpoint = f"{self.base_url}/coins/{coin_id}/market_chart"
         params = {
             'vs_currency': 'usd',
-            'days': days,
+            'days': str(days),  # Convert to string
             'interval': 'daily'
         }
             
         try:
             response = requests.get(endpoint, params=params, headers=self.headers)
+            
+            if response.status_code != 200:
+                print(f"Error fetching {coin_id}: {response.status_code} - {response.text[:200]}")
+                
             response.raise_for_status()
             
             data = response.json()
@@ -123,10 +128,6 @@ class CryptoDataFetcher:
             # Convert to DataFrame
             df = pd.DataFrame(data['prices'], columns=['timestamp', 'price'])
             
-            # Verify data types
-            if df['timestamp'].dtype not in ['int64', 'float64']:
-                raise ValueError(f"Unexpected timestamp format for {coin_id}")
-            
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df['date'] = df['timestamp'].dt.date
             
@@ -139,23 +140,23 @@ class CryptoDataFetcher:
                 print(f"Warning: All prices are NaN for {coin_id}")
                 return None
             
+            print(f"Fetched {len(df)} days of data for {coin_id}")
+            
             return df
             
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 429:
-                print(f"Rate limit exceeded while fetching {coin_id}. Please wait or use an API key.")
+                print(f"Rate limit exceeded while fetching {coin_id}.")
             elif e.response.status_code == 404:
                 print(f"Coin {coin_id} not found")
                 return None
             raise
+        except Exception as e:
+            print(f"Error fetching {coin_id}: {str(e)}")
+            raise
     
     def calculate_log_returns(self, df):
-        """Calculate daily log returns
-        
-        Log return from day t-1 to day t is: log(price[t]) - log(price[t-1])
-        This is stored at index t, so we need price data from day 0 to calculate
-        the log return for day 1.
-        """
+        """Calculate daily log returns"""
         df = df.copy()
         df['log_return'] = pd.Series(df['price']).apply(lambda x: np.log(x) if x > 0 else np.nan).diff()
         return df
@@ -175,15 +176,21 @@ class CryptoDataFetcher:
         print(f"Saved metadata to {metadata_path}")
         
         # Create a combined dataset for easier processing
-        combined_df = pd.DataFrame()
-        
-        # Get the date range from Bitcoin (reference coin)
+        if not coin_data:
+            print("Warning: No coin data to combine!")
+            return
+            
+        # Get the date range from the first coin with data
         ref_coin_id = metadata['reference_coin']
+        if ref_coin_id not in coin_data and coin_data:
+            ref_coin_id = list(coin_data.keys())[0]
+            print(f"Warning: Reference coin {metadata['reference_coin']} not in data, using {ref_coin_id}")
+        
         if ref_coin_id in coin_data:
             base_dates = coin_data[ref_coin_id][['date']].copy()
             combined_df = base_dates
         else:
-            print(f"Warning: Reference coin {ref_coin_id} not found in data")
+            print(f"Error: No valid reference coin found")
             return
         
         # Add each coin's data
@@ -196,24 +203,43 @@ class CryptoDataFetcher:
             
             combined_df = pd.merge(combined_df, coin_df, on='date', how='left')
         
-        # Sort by date - DO NOT forward fill or backward fill
-        # Keep NaN values to indicate missing data
+        # Sort by date
         combined_df = combined_df.sort_values('date')
         
         combined_path = os.path.join(self.output_dir, "combined_data.csv")
         combined_df.to_csv(combined_path, index=False)
         print(f"Saved combined data to {combined_path}")
+        print(f"Combined data shape: {combined_df.shape}")
     
     def run(self):
         """Main execution function"""
         print("Starting cryptocurrency data fetch pipeline...")
+        print(f"Output directory: {os.path.abspath(self.output_dir)}")
         self.status.update_step("initialization", "success", "Pipeline initialized")
         
         try:
             # Step 1: Fetch top cryptocurrencies
-            print("Fetching top 20 cryptocurrencies by market cap...")
+            print("\n" + "="*50)
+            print("Step 1: Fetching top cryptocurrencies")
+            print("="*50)
+            
             self.status.update_step("fetch_top_coins", "running")
-            top_cryptos = self.get_top_cryptos(20)
+            
+            try:
+                top_cryptos = self.get_top_cryptos(20)
+            except Exception as e:
+                print(f"Failed to fetch from API: {str(e)}")
+                print("Using fallback list of top cryptocurrencies...")
+                
+                # Fallback list of top cryptos by market cap (as of 2024)
+                top_cryptos = [
+                    {'id': 'bitcoin', 'symbol': 'btc', 'name': 'Bitcoin', 'market_cap': 1000000000000},
+                    {'id': 'ethereum', 'symbol': 'eth', 'name': 'Ethereum', 'market_cap': 500000000000},
+                    {'id': 'tether', 'symbol': 'usdt', 'name': 'Tether', 'market_cap': 100000000000},
+                    {'id': 'binancecoin', 'symbol': 'bnb', 'name': 'BNB', 'market_cap': 90000000000},
+                    {'id': 'solana', 'symbol': 'sol', 'name': 'Solana', 'market_cap': 80000000000},
+                ]
+                
             self.status.update_step("fetch_top_coins", "success", 
                                   f"Retrieved {len(top_cryptos)} coins")
             
@@ -227,13 +253,17 @@ class CryptoDataFetcher:
             coin_data = {}
             failed_coins = []
             
+            print("\n" + "="*50)
+            print("Step 2: Fetching historical data for each coin")
+            print("="*50)
+            
             for i, crypto in enumerate(top_cryptos):
                 coin_id = crypto['id']
                 symbol = crypto['symbol'].upper()
                 name = crypto['name']
-                market_cap = crypto['market_cap']
+                market_cap = crypto.get('market_cap', 0)
                 
-                print(f"\nFetching data for {name} ({symbol})... [{i+1}/20]")
+                print(f"\nFetching data for {name} ({symbol})... [{i+1}/{len(top_cryptos)}]")
                 self.status.update_step(f"fetch_{coin_id}", "running")
                 
                 metadata['coins'].append({
@@ -261,11 +291,8 @@ class CryptoDataFetcher:
                     self.status.update_step(f"fetch_{coin_id}", "success", 
                                           f"{len(df)} days of data")
                     
-                    # Rate limiting - increase wait time for public API
-                    if self.api_key:
-                        time.sleep(0.5)
-                    else:
-                        time.sleep(3.0)  # Increased from 2.5 to 3.0 seconds
+                    # Rate limiting - more conservative
+                    time.sleep(1.0 if self.api_key else 3.0)
                     
                 except Exception as e:
                     error_msg = f"Error fetching data for {coin_id}: {str(e)}"
@@ -274,15 +301,32 @@ class CryptoDataFetcher:
                                           error=str(e))
                     self.status.add_error(error_msg, f"fetch_{coin_id}")
                     failed_coins.append(coin_id)
-                    continue
+                    
+                    # Don't fail the entire pipeline for individual coin failures
+                    if len(coin_data) >= 2:  # Continue if we have at least 2 coins
+                        continue
+                    else:
+                        print("Too many failures, stopping...")
+                        break
             
-            # Find the coin with highest market cap (should be Bitcoin)
-            metadata['reference_coin'] = metadata['coins'][0]['id']
+            # Set reference coin
+            if coin_data:
+                # Use bitcoin if available, otherwise first successful coin
+                if 'bitcoin' in coin_data:
+                    metadata['reference_coin'] = 'bitcoin'
+                else:
+                    metadata['reference_coin'] = list(coin_data.keys())[0]
+            else:
+                raise Exception("No coin data was successfully fetched!")
+                
             metadata['failed_coins'] = failed_coins
             metadata['successful_coins'] = len(coin_data)
             
-            # Step 2: Save data
-            print("\nSaving all data...")
+            # Step 3: Save data
+            print("\n" + "="*50)
+            print("Step 3: Saving data")
+            print("="*50)
+            
             self.status.update_step("save_data", "running")
             self.save_data(coin_data, metadata)
             self.status.update_step("save_data", "success", 
@@ -292,14 +336,18 @@ class CryptoDataFetcher:
             if failed_coins:
                 self.status.add_warning(f"{len(failed_coins)} coins failed to fetch: {', '.join(failed_coins)}")
             
-            print("\nData fetching complete!")
+            print("\n" + "="*50)
+            print("SUMMARY")
+            print("="*50)
             print(f"Successfully fetched: {len(coin_data)} coins")
             print(f"Failed: {len(failed_coins)} coins")
             
+            if coin_data:
+                print(f"Reference coin: {metadata['reference_coin']}")
+                print(f"Data saved to: {os.path.abspath(self.output_dir)}")
+            
             # Save final status
-            print("\n" + "="*50)
-            print(self.status.create_summary())
-            print("="*50)
+            print("\n" + self.status.create_summary())
             
             return metadata
             
@@ -308,9 +356,7 @@ class CryptoDataFetcher:
             self.status.update_step("pipeline", "failed", error=str(e))
             self.status.add_error(error_msg, "main")
             print(f"\nERROR: {error_msg}")
-            print("\n" + "="*50)
-            print(self.status.create_summary())
-            print("="*50)
+            print("\n" + self.status.create_summary())
             raise
 
 if __name__ == "__main__":

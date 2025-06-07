@@ -45,104 +45,32 @@ jobs:
         COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
       run: |
         cd backend/data_fetcher
-        python fetch_crypto_data.py || echo "Fetch completed with errors"
+        python fetch_crypto_data.py
       continue-on-error: false
       timeout-minutes: 10
     
-    - name: Check if data files were created
-      id: check-files
+    - name: Verify data files
       run: |
         echo "Checking for required files..."
         
-        # Check each required file
-        FILES_OK=true
+        if [ -f "backend/data/combined_data.csv" ]; then
+          echo "✓ combined_data.csv exists"
+          echo "File size: $(stat -c%s backend/data/combined_data.csv) bytes"
+          echo "First 3 lines:"
+          head -3 backend/data/combined_data.csv
+        else
+          echo "✗ combined_data.csv missing!"
+          exit 1
+        fi
         
         if [ -f "backend/data/metadata.json" ]; then
           echo "✓ metadata.json exists"
         else
-          echo "✗ metadata.json missing"
-          FILES_OK=false
-        fi
-        
-        if [ -f "backend/data/combined_data.csv" ]; then
-          echo "✓ combined_data.csv exists ($(stat -c%s backend/data/combined_data.csv) bytes)"
-          head -3 backend/data/combined_data.csv
-        else
-          echo "✗ combined_data.csv missing"
-          FILES_OK=false
-        fi
-        
-        if [ -f "backend/data/pipeline_status.json" ]; then
-          echo "✓ pipeline_status.json exists"
-          # Show any errors from the status file
-          python3 -c "
-import json
-with open('backend/data/pipeline_status.json', 'r') as f:
-    status = json.load(f)
-    if status.get('errors'):
-        print('\nErrors found:')
-        for err in status['errors'][:3]:  # Show first 3 errors
-            print(f\"  - {err.get('message', 'Unknown error')}\")
-    print(f\"\nOverall status: {status.get('overall_status', 'unknown')}\")
-          "
-        else
-          echo "✗ pipeline_status.json missing"
-        fi
-        
-        if [ "$FILES_OK" = "false" ]; then
-          echo "ERROR: Required files are missing!"
-          
-          # Create minimal test data as fallback
-          echo "Creating minimal test data..."
-          cd backend/data_fetcher
-          python3 -c "
-import pandas as pd
-import json
-import os
-from datetime import datetime, timedelta
-
-output_dir = '../data'
-
-# Create minimal metadata
-metadata = {
-    'fetch_date': datetime.now().isoformat(),
-    'coins': [
-        {'id': 'bitcoin', 'symbol': 'BTC', 'name': 'Bitcoin'},
-        {'id': 'ethereum', 'symbol': 'ETH', 'name': 'Ethereum'}
-    ],
-    'reference_coin': 'bitcoin'
-}
-
-with open(os.path.join(output_dir, 'metadata.json'), 'w') as f:
-    json.dump(metadata, f)
-
-# Create minimal combined data
-dates = pd.date_range(end=datetime.now(), periods=30, freq='D')
-data = {
-    'date': dates.strftime('%Y-%m-%d'),
-    'bitcoin_price': [40000] * 30,
-    'bitcoin_log_return': [0.01] * 30,
-    'ethereum_price': [2500] * 30,
-    'ethereum_log_return': [0.02] * 30
-}
-
-df = pd.DataFrame(data)
-df.to_csv(os.path.join(output_dir, 'combined_data.csv'), index=False)
-
-print('Created minimal test data files')
-          "
-        fi
-        
-        # Final check
-        if [ -f "backend/data/combined_data.csv" ] && [ -f "backend/data/metadata.json" ]; then
-          echo "files_created=true" >> $GITHUB_OUTPUT
-        else
-          echo "files_created=false" >> $GITHUB_OUTPUT
+          echo "✗ metadata.json missing!"
           exit 1
         fi
     
     - name: Upload data artifacts
-      if: steps.check-files.outputs.files_created == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: crypto-data
@@ -155,7 +83,7 @@ print('Created minimal test data files')
       run: |
         if [ -f "backend/data/pipeline_status.json" ]; then
           echo "Pipeline status:"
-          cat backend/data/pipeline_status.json | python3 -m json.tool | head -50
+          cat backend/data/pipeline_status.json | python -m json.tool | head -50
         else
           echo "No pipeline status file found"
         fi
@@ -172,28 +100,17 @@ print('Created minimal test data files')
         name: crypto-data
         path: backend/data/
     
-    - name: Verify downloaded files
+    - name: List downloaded files
       run: |
-        echo "=== Contents of backend/data/ ==="
+        echo "Contents of backend/data/:"
         ls -la backend/data/
-        
-        echo -e "\n=== Checking combined_data.csv ==="
-        if [ -f "backend/data/combined_data.csv" ]; then
-          echo "✓ File exists ($(stat -c%s backend/data/combined_data.csv) bytes)"
-          echo "Column headers:"
-          head -1 backend/data/combined_data.csv
-          echo "Row count: $(wc -l < backend/data/combined_data.csv)"
-        else
-          echo "✗ combined_data.csv is missing!"
-          exit 1
-        fi
     
-    - name: Set up Python for wrapper script
+    - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
     
-    - name: Install Python dependencies for wrapper
+    - name: Install Python dependencies
       run: |
         cd backend/data_fetcher
         pip install -r requirements.txt
@@ -217,23 +134,15 @@ print('Created minimal test data files')
     
     - name: Verify analysis outputs
       run: |
-        echo "Checking for expected output files..."
-        MISSING_FILES=""
-        
+        echo "Checking for analysis output files..."
         for window in 7 14 30 60 90 120 180; do
           if [ -f "backend/data/regression_results_window_${window}.json" ]; then
             echo "✓ Found regression_results_window_${window}.json"
           else
             echo "✗ Missing regression_results_window_${window}.json"
-            MISSING_FILES="${MISSING_FILES} ${window}"
+            exit 1
           fi
         done
-        
-        if [ -n "$MISSING_FILES" ]; then
-          echo "ERROR: Missing analysis files for windows:${MISSING_FILES}"
-          exit 1
-        fi
-        
         echo "All expected files found!"
     
     - name: Upload analysis results
