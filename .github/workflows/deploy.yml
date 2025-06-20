@@ -129,6 +129,7 @@ jobs:
     - name: Verify analysis outputs
       run: |
         echo "Checking for analysis output files..."
+        # Check standard regression files
         for window in 7 14 30 60 90 120 180; do
           if [ -f "backend/data/regression_results_window_${window}.json" ]; then
             echo "✓ Found regression_results_window_${window}.json"
@@ -137,11 +138,23 @@ jobs:
             exit 1
           fi
         done
+        
+        # Check segmented regression files (only for windows >= 60)
+        for window in 60 90 120 180; do
+          if [ -f "backend/data/segmented_regression_results_window_${window}.json" ]; then
+            echo "✓ Found segmented_regression_results_window_${window}.json"
+          else
+            echo "✗ Missing segmented_regression_results_window_${window}.json"
+            exit 1
+          fi
+        done
+        
         echo "All expected files found!"
     
     - name: Copy data to frontend
       run: |
         mkdir -p frontend/data
+        # Copy all JSON files (including segmented results)
         cp backend/data/*.json frontend/data/
         cp backend/data/combined_data.csv frontend/data/
         echo "Files copied to frontend/data:"

@@ -211,6 +211,15 @@
             color: #f56565;
         }
 
+        .warning {
+            background: #2a1a1a;
+            border: 1px solid #ed8936;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #ed8936;
+        }
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -260,6 +269,25 @@
 
         .loading-dots {
             animation: pulse 1.5s infinite;
+        }
+
+        .asymmetry-indicator {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            margin-left: 10px;
+            font-weight: 600;
+        }
+
+        .asymmetry-significant {
+            background: #48bb78;
+            color: #1a1a1a;
+        }
+
+        .asymmetry-not-significant {
+            background: #4a5568;
+            color: #e0e0e0;
         }
     </style>
 </head>
@@ -314,10 +342,11 @@
                 
                 <div class="control-item">
                     <label for="chartType">Chart Type</label>
-                    <select id="chartType">
+                    <select id="chartType" onchange="handleChartTypeChange()">
                         <option value="both">Both Alpha & Beta</option>
                         <option value="alpha">Alpha Only</option>
                         <option value="beta">Beta Only</option>
+                        <option value="segmented">Segmented Betas</option>
                     </select>
                 </div>
             </div>
@@ -355,6 +384,7 @@
         // Global variables
         let charts = {};
         let currentCoinData = null;
+        let currentSegmentedData = null;
 
         // Chart.js default configuration
         Chart.defaults.color = '#888';
@@ -404,6 +434,18 @@
             }
         }
 
+        // Handle chart type change
+        function handleChartTypeChange() {
+            const chartType = document.getElementById('chartType').value;
+            const windowSize = parseInt(document.getElementById('windowSize').value);
+            
+            if (chartType === 'segmented' && windowSize < 60) {
+                showWarning('Segmented beta analysis requires a window size of at least 60 days (2 months). Please select a larger window size.');
+                // Reset to previous chart type
+                document.getElementById('chartType').value = 'both';
+            }
+        }
+
         // Toggle comparison coin selector
         function toggleComparisonCoin() {
             const mode = document.getElementById('comparisonMode').value;
@@ -439,6 +481,12 @@
                 return;
             }
 
+            // Check window size for segmented analysis
+            if (chartType === 'segmented' && windowSize < 60) {
+                showError('Segmented beta analysis requires a window size of at least 60 days (2 months). Please select a larger window size.');
+                return;
+            }
+
             // Validate window size
             const validWindowSizes = [7, 14, 30, 60, 90, 120, 180];
             if (!validWindowSizes.includes(windowSize)) {
@@ -450,38 +498,73 @@
             document.getElementById('chartContainer').innerHTML = '<div class="loading"><span class="loading-dots">Loading data...</span></div>';
 
             try {
-                // Load real data
-                const dataFile = `./data/regression_results_window_${windowSize}.json`;
-                const response = await fetch(dataFile);
-                
-                if (!response.ok) {
-                    throw new Error(`Failed to load regression data for window size ${windowSize}. Data may not have been generated for this window size.`);
-                }
-                
-                const analysisData = await response.json();
-                
-                if (comparisonMode === 'single') {
-                    // Filter data for selected coin
-                    const coinData = analysisData.results.filter(r => r.coin_id === coinId);
+                if (chartType === 'segmented') {
+                    // Load segmented data
+                    const segmentedDataFile = `./data/segmented_regression_results_window_${windowSize}.json`;
+                    const segmentedResponse = await fetch(segmentedDataFile);
                     
-                    if (coinData.length === 0) {
-                        throw new Error(`No analysis data available for ${coinId}`);
+                    if (!segmentedResponse.ok) {
+                        throw new Error(`Failed to load segmented regression data for window size ${windowSize}. This may be because the window size is too small for segmented analysis.`);
                     }
                     
-                    currentCoinData = coinData;
-                    await displayCharts(currentCoinData, chartType);
-                    updateStatistics(currentCoinData);
+                    const segmentedAnalysisData = await segmentedResponse.json();
+                    
+                    if (comparisonMode === 'single') {
+                        const segmentedCoinData = segmentedAnalysisData.results.filter(r => r.coin_id === coinId);
+                        
+                        if (segmentedCoinData.length === 0) {
+                            throw new Error(`No segmented analysis data available for ${coinId}`);
+                        }
+                        
+                        currentSegmentedData = segmentedCoinData;
+                        await displaySegmentedCharts(currentSegmentedData);
+                        updateSegmentedStatistics(currentSegmentedData);
+                    } else {
+                        // Filter data for both coins
+                        const segmentedCoinData1 = segmentedAnalysisData.results.filter(r => r.coin_id === coinId);
+                        const segmentedCoinData2 = segmentedAnalysisData.results.filter(r => r.coin_id === coinId2);
+                        
+                        if (segmentedCoinData1.length === 0 && segmentedCoinData2.length === 0) {
+                            throw new Error('No segmented analysis data available for the selected coins');
+                        }
+                        
+                        await displaySegmentedComparisonCharts(segmentedCoinData1, segmentedCoinData2, coinId, coinId2);
+                        updateSegmentedComparisonStatistics(segmentedCoinData1, segmentedCoinData2, coinId, coinId2);
+                    }
                 } else {
-                    // Filter data for both coins
-                    const coinData1 = analysisData.results.filter(r => r.coin_id === coinId);
-                    const coinData2 = analysisData.results.filter(r => r.coin_id === coinId2);
+                    // Load standard data
+                    const dataFile = `./data/regression_results_window_${windowSize}.json`;
+                    const response = await fetch(dataFile);
                     
-                    if (coinData1.length === 0 && coinData2.length === 0) {
-                        throw new Error('No analysis data available for the selected coins');
+                    if (!response.ok) {
+                        throw new Error(`Failed to load regression data for window size ${windowSize}. Data may not have been generated for this window size.`);
                     }
                     
-                    await displayComparisonCharts(coinData1, coinData2, coinId, coinId2, chartType);
-                    updateComparisonStatistics(coinData1, coinData2, coinId, coinId2);
+                    const analysisData = await response.json();
+                    
+                    if (comparisonMode === 'single') {
+                        // Filter data for selected coin
+                        const coinData = analysisData.results.filter(r => r.coin_id === coinId);
+                        
+                        if (coinData.length === 0) {
+                            throw new Error(`No analysis data available for ${coinId}`);
+                        }
+                        
+                        currentCoinData = coinData;
+                        await displayCharts(currentCoinData, chartType);
+                        updateStatistics(currentCoinData);
+                    } else {
+                        // Filter data for both coins
+                        const coinData1 = analysisData.results.filter(r => r.coin_id === coinId);
+                        const coinData2 = analysisData.results.filter(r => r.coin_id === coinId2);
+                        
+                        if (coinData1.length === 0 && coinData2.length === 0) {
+                            throw new Error('No analysis data available for the selected coins');
+                        }
+                        
+                        await displayComparisonCharts(coinData1, coinData2, coinId, coinId2, chartType);
+                        updateComparisonStatistics(coinData1, coinData2, coinId, coinId2);
+                    }
                 }
 
                 // Show stats container
@@ -491,6 +574,1235 @@
                 console.error('Error loading data:', error);
                 showError(error.message || 'Failed to load data. Please ensure the analysis has been run for the selected window size.');
                 document.getElementById('statsContainer').style.display = 'none';
+            }
+        }
+
+        // Display segmented beta charts
+        async function displaySegmentedCharts(data) {
+            const container = document.getElementById('chartContainer');
+            container.innerHTML = '';
+
+            // Destroy existing charts
+            Object.values(charts).forEach(chart => chart.destroy());
+            charts = {};
+
+            // Get coin info for display
+            const coinId = document.getElementById('coinSelect').value;
+            const coinName = document.querySelector(`#coinSelect option[value="${coinId}"]`).textContent;
+
+            // Always show price chart first
+            await createPriceChart(container, coinId, coinName);
+
+            // Show alpha coefficient
+            createSegmentedChart(container, data, 'alpha', 'Alpha Coefficient', '#667eea');
+
+            // Show segmented betas
+            createSegmentedBetaChart(container, data, coinName);
+
+            // Show asymmetry test results
+            createAsymmetryTestChart(container, data, coinName);
+        }
+
+        // Create segmented beta chart
+        function createSegmentedBetaChart(container, data, coinName) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+
+            const titleElem = document.createElement('h3');
+            titleElem.className = 'chart-title';
+            titleElem.textContent = 'Segmented Beta Coefficients';
+            wrapper.appendChild(titleElem);
+
+            // Add chart controls
+            const controls = document.createElement('div');
+            controls.className = 'chart-controls';
+            controls.innerHTML = `
+                <button class="chart-control-btn" onclick="resetZoom('segmented_beta')">Reset Zoom</button>
+                <button class="chart-control-btn" onclick="toggleSegmentedConfidenceBands('segmented_beta')">Toggle 90% CI</button>
+            `;
+            wrapper.appendChild(controls);
+
+            // Add instructions
+            const instructions = document.createElement('div');
+            instructions.className = 'chart-instructions';
+            instructions.textContent = 'Scroll to zoom, drag to pan. β⁺: sensitivity when Bitcoin rises, β⁻: sensitivity when Bitcoin falls';
+            wrapper.appendChild(instructions);
+
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            // Filter out null values
+            const validData = data.filter(d => d.beta_positive !== null && d.beta_negative !== null);
+
+            // Calculate viewing window
+            const windowSize = parseInt(document.getElementById('windowSize').value);
+            const viewSize = Math.max(windowSize, 30);
+            
+            let minDate, maxDate;
+            if (validData.length > 0) {
+                const dates = validData.map(d => new Date(d.date));
+                maxDate = new Date(Math.max(...dates));
+                minDate = new Date(maxDate);
+                minDate.setDate(minDate.getDate() - viewSize + 1);
+            }
+
+            // Prepare datasets
+            const datasets = [
+                {
+                    label: 'β⁺ (Positive Market)',
+                    data: validData.map(d => d.beta_positive),
+                    borderColor: '#48bb78',
+                    backgroundColor: '#48bb7820',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0.1,
+                    fill: false
+                },
+                {
+                    label: 'β⁻ (Negative Market)',
+                    data: validData.map(d => d.beta_negative),
+                    borderColor: '#f56565',
+                    backgroundColor: '#f5656520',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0.1,
+                    fill: false
+                }
+            ];
+
+            // Add confidence bands
+            if (validData.length > 0 && validData[0].beta_positive_lower_90 !== undefined) {
+                // β⁺ confidence bands
+                datasets.push({
+                    label: 'β⁺ Upper 90% CI',
+                    data: validData.map(d => d.beta_positive_upper_90),
+                    borderColor: 'rgba(72, 187, 120, 0.3)',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+                
+                datasets.push({
+                    label: 'β⁺ Lower 90% CI',
+                    data: validData.map(d => d.beta_positive_lower_90),
+                    borderColor: 'rgba(72, 187, 120, 0.3)',
+                    backgroundColor: 'rgba(72, 187, 120, 0.15)',
+                    fill: '-1',
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+
+                // β⁻ confidence bands
+                datasets.push({
+                    label: 'β⁻ Upper 90% CI',
+                    data: validData.map(d => d.beta_negative_upper_90),
+                    borderColor: 'rgba(245, 101, 101, 0.3)',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+                
+                datasets.push({
+                    label: 'β⁻ Lower 90% CI',
+                    data: validData.map(d => d.beta_negative_lower_90),
+                    borderColor: 'rgba(245, 101, 101, 0.3)',
+                    backgroundColor: 'rgba(245, 101, 101, 0.15)',
+                    fill: '-1',
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+            }
+
+            // Add reference line at β = 1
+            datasets.push({
+                label: 'Reference (β = 1)',
+                data: validData.map(() => 1),
+                borderColor: 'rgba(128, 128, 128, 0.5)',
+                borderWidth: 1,
+                borderDash: [10, 5],
+                pointRadius: 0,
+                fill: false
+            });
+
+            const ctx = canvas.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: validData.map(d => d.date),
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                filter: function(item) {
+                                    return !item.text.includes('CI') && !item.text.includes('Reference');
+                                },
+                                color: '#e0e0e0',
+                                padding: 15,
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                            titleColor: '#e0e0e0',
+                            bodyColor: '#e0e0e0',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                            padding: 12,
+                            displayColors: false,
+                            callbacks: {
+                                label: function(context) {
+                                    const index = context.dataIndex;
+                                    const dataPoint = validData[index];
+                                    
+                                    if (context.datasetIndex === 0) { // β⁺
+                                        const labels = [`β⁺: ${context.parsed.y.toFixed(6)}`];
+                                        labels.push(`90% CI: [${dataPoint.beta_positive_lower_90.toFixed(6)}, ${dataPoint.beta_positive_upper_90.toFixed(6)}]`);
+                                        if (dataPoint.beta_positive_lower_90 > 1) {
+                                            labels.push('⚠️ Significantly > 1 (amplifies positive movements)');
+                                        } else if (dataPoint.beta_positive_upper_90 < 1) {
+                                            labels.push('✓ Significantly < 1 (dampens positive movements)');
+                                        }
+                                        return labels;
+                                    } else if (context.datasetIndex === 1) { // β⁻
+                                        const labels = [`β⁻: ${context.parsed.y.toFixed(6)}`];
+                                        labels.push(`90% CI: [${dataPoint.beta_negative_lower_90.toFixed(6)}, ${dataPoint.beta_negative_upper_90.toFixed(6)}]`);
+                                        if (dataPoint.beta_negative_lower_90 > 1) {
+                                            labels.push('⚠️ Significantly > 1 (amplifies negative movements)');
+                                        } else if (dataPoint.beta_negative_upper_90 < 1) {
+                                            labels.push('✓ Significantly < 1 (dampens negative movements)');
+                                        }
+                                        // Add asymmetry test result
+                                        if (dataPoint.betas_significantly_different !== null) {
+                                            labels.push('');
+                                            labels.push(`Asymmetry test p-value: ${dataPoint.asymmetry_p_value.toFixed(4)}`);
+                                            labels.push(dataPoint.betas_significantly_different ? 
+                                                '⚠️ β⁺ and β⁻ are significantly different' : 
+                                                '↔️ β⁺ and β⁻ are not significantly different');
+                                        }
+                                        return labels;
+                                    }
+                                    return null;
+                                }
+                            }
+                        },
+                        zoom: {
+                            limits: {
+                                x: {
+                                    min: 'original',
+                                    max: 'original'
+                                },
+                                y: {
+                                    min: 'original',
+                                    max: 'original'
+                                }
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: null
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                drag: {
+                                    enabled: false
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM DD'
+                                }
+                            },
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                maxRotation: 45,
+                                minRotation: 0
+                            },
+                            min: minDate,
+                            max: maxDate
+                        },
+                        y: {
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                callback: function(value) {
+                                    return value.toFixed(4);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            charts['segmented_beta'] = chart;
+            chart.confidenceBandsVisible = true;
+        }
+
+        // Create asymmetry test visualization
+        function createAsymmetryTestChart(container, data, coinName) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+
+            const titleElem = document.createElement('h3');
+            titleElem.className = 'chart-title';
+            titleElem.textContent = 'Asymmetry Test (β⁺ vs β⁻)';
+            wrapper.appendChild(titleElem);
+
+            // Add chart controls
+            const controls = document.createElement('div');
+            controls.className = 'chart-controls';
+            controls.innerHTML = `
+                <button class="chart-control-btn" onclick="resetZoom('asymmetry_test')">Reset Zoom</button>
+            `;
+            wrapper.appendChild(controls);
+
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            // Filter out null values
+            const validData = data.filter(d => d.asymmetry_p_value !== null);
+
+            // Calculate viewing window
+            const windowSize = parseInt(document.getElementById('windowSize').value);
+            const viewSize = Math.max(windowSize, 30);
+            
+            let minDate, maxDate;
+            if (validData.length > 0) {
+                const dates = validData.map(d => new Date(d.date));
+                maxDate = new Date(Math.max(...dates));
+                minDate = new Date(maxDate);
+                minDate.setDate(minDate.getDate() - viewSize + 1);
+            }
+
+            const ctx = canvas.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: validData.map(d => d.date),
+                    datasets: [
+                        {
+                            label: 'P-value',
+                            data: validData.map(d => d.asymmetry_p_value),
+                            borderColor: '#667eea',
+                            backgroundColor: validData.map(d => 
+                                d.betas_significantly_different ? 'rgba(72, 187, 120, 0.5)' : 'rgba(128, 128, 128, 0.5)'
+                            ),
+                            borderWidth: 2,
+                            pointRadius: 4,
+                            pointHoverRadius: 6,
+                            tension: 0.1,
+                            fill: false
+                        },
+                        {
+                            label: '10% Significance Level',
+                            data: validData.map(() => 0.10),
+                            borderColor: 'rgba(245, 101, 101, 0.7)',
+                            borderWidth: 2,
+                            borderDash: [10, 5],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#e0e0e0',
+                                padding: 15,
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                            titleColor: '#e0e0e0',
+                            bodyColor: '#e0e0e0',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                            padding: 12,
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.datasetIndex === 0) {
+                                        const index = context.dataIndex;
+                                        const dataPoint = validData[index];
+                                        const labels = [`P-value: ${dataPoint.asymmetry_p_value.toFixed(4)}`];
+                                        labels.push(`Test statistic: ${dataPoint.asymmetry_test_statistic.toFixed(4)}`);
+                                        labels.push(dataPoint.betas_significantly_different ? 
+                                            '✓ Betas are significantly different (p < 0.10)' : 
+                                            '✗ Betas are not significantly different (p ≥ 0.10)');
+                                        labels.push(`β⁺: ${dataPoint.beta_positive.toFixed(6)}`);
+                                        labels.push(`β⁻: ${dataPoint.beta_negative.toFixed(6)}`);
+                                        labels.push(`Difference: ${(dataPoint.beta_positive - dataPoint.beta_negative).toFixed(6)}`);
+                                        return labels;
+                                    }
+                                    return null;
+                                }
+                            }
+                        },
+                        zoom: {
+                            limits: {
+                                x: {
+                                    min: 'original',
+                                    max: 'original'
+                                },
+                                y: {
+                                    min: 0,
+                                    max: 1
+                                }
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: null
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                drag: {
+                                    enabled: false
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM DD'
+                                }
+                            },
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                maxRotation: 45,
+                                minRotation: 0
+                            },
+                            min: minDate,
+                            max: maxDate
+                        },
+                        y: {
+                            min: 0,
+                            max: 1,
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                callback: function(value) {
+                                    return value.toFixed(2);
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'P-value',
+                                color: '#888'
+                            }
+                        }
+                    }
+                }
+            });
+
+            charts['asymmetry_test'] = chart;
+        }
+
+        // Create segmented chart for alpha
+        function createSegmentedChart(container, data, dataKey, title, color) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+
+            const titleElem = document.createElement('h3');
+            titleElem.className = 'chart-title';
+            titleElem.textContent = title;
+            wrapper.appendChild(titleElem);
+
+            // Add chart controls
+            const controls = document.createElement('div');
+            controls.className = 'chart-controls';
+            controls.innerHTML = `
+                <button class="chart-control-btn" onclick="resetZoom('${dataKey}_segmented')">Reset Zoom</button>
+                <button class="chart-control-btn" onclick="toggleConfidenceBands('${dataKey}_segmented')">Toggle 90% CI</button>
+            `;
+            wrapper.appendChild(controls);
+
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            // Filter out null values
+            const validData = data.filter(d => d[dataKey] !== null);
+
+            // Calculate viewing window
+            const windowSize = parseInt(document.getElementById('windowSize').value);
+            const viewSize = Math.max(windowSize, 30);
+            
+            let minDate, maxDate;
+            if (validData.length > 0) {
+                const dates = validData.map(d => new Date(d.date));
+                maxDate = new Date(Math.max(...dates));
+                minDate = new Date(maxDate);
+                minDate.setDate(minDate.getDate() - viewSize + 1);
+            }
+
+            // Prepare datasets
+            const datasets = [
+                {
+                    label: title,
+                    data: validData.map(d => d[dataKey]),
+                    borderColor: color,
+                    backgroundColor: color + '20',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0.1,
+                    fill: false
+                }
+            ];
+
+            // Add confidence bands
+            const lowerKey = dataKey + '_lower_90';
+            const upperKey = dataKey + '_upper_90';
+            
+            if (validData.length > 0 && validData[0][lowerKey] !== undefined) {
+                datasets.push({
+                    label: 'Upper 90% CI',
+                    data: validData.map(d => d[upperKey]),
+                    borderColor: 'rgba(128, 128, 128, 0.3)',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+                
+                datasets.push({
+                    label: 'Lower 90% CI',
+                    data: validData.map(d => d[lowerKey]),
+                    borderColor: 'rgba(128, 128, 128, 0.3)',
+                    backgroundColor: 'rgba(128, 128, 128, 0.15)',
+                    fill: '-1',
+                    pointRadius: 0,
+                    showLine: true,
+                    borderWidth: 1,
+                    borderDash: [3, 3]
+                });
+            }
+
+            const ctx = canvas.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: validData.map(d => d.date),
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                filter: function(item) {
+                                    return !item.text.includes('CI');
+                                },
+                                color: '#e0e0e0',
+                                padding: 15,
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                            titleColor: '#e0e0e0',
+                            bodyColor: '#e0e0e0',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                            padding: 12,
+                            displayColors: false,
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.datasetIndex === 0) {
+                                        const index = context.dataIndex;
+                                        const value = context.parsed.y;
+                                        const lower = validData[index][lowerKey];
+                                        const upper = validData[index][upperKey];
+                                        
+                                        let labels = [`${title}: ${value.toFixed(6)}`];
+                                        
+                                        if (lower !== undefined && upper !== undefined) {
+                                            labels.push(`90% CI: [${lower.toFixed(6)}, ${upper.toFixed(6)}]`);
+                                            
+                                            if (dataKey === 'alpha') {
+                                                if (lower > 0) {
+                                                    labels.push('✓ Significantly > 0 (positive excess return)');
+                                                } else if (upper < 0) {
+                                                    labels.push('⚠️ Significantly < 0 (negative excess return)');
+                                                } else {
+                                                    labels.push('↔️ Not significantly different from 0');
+                                                }
+                                            }
+                                        }
+                                        
+                                        return labels;
+                                    }
+                                    return null;
+                                }
+                            }
+                        },
+                        zoom: {
+                            limits: {
+                                x: {
+                                    min: 'original',
+                                    max: 'original'
+                                },
+                                y: {
+                                    min: 'original',
+                                    max: 'original'
+                                }
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: null
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                drag: {
+                                    enabled: false
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM DD'
+                                }
+                            },
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                maxRotation: 45,
+                                minRotation: 0
+                            },
+                            min: minDate,
+                            max: maxDate
+                        },
+                        y: {
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                callback: function(value) {
+                                    return value.toFixed(4);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            charts[dataKey + '_segmented'] = chart;
+            chart.confidenceBandsVisible = true;
+        }
+
+        // Toggle confidence bands for segmented charts
+        window.toggleSegmentedConfidenceBands = function(chartKey) {
+            const chart = charts[chartKey];
+            if (chart) {
+                chart.confidenceBandsVisible = !chart.confidenceBandsVisible;
+                
+                // Toggle visibility of CI datasets
+                chart.data.datasets.forEach((dataset, index) => {
+                    if (dataset.label.includes('CI')) {
+                        chart.data.datasets[index].hidden = !chart.confidenceBandsVisible;
+                    }
+                });
+                
+                chart.update('none');
+            }
+        }
+
+        // Update statistics for segmented analysis
+        function updateSegmentedStatistics(data) {
+            if (!data || data.length === 0) return;
+
+            // Filter out null values
+            const validData = data.filter(d => d.alpha !== null && d.beta_positive !== null && d.beta_negative !== null);
+            
+            if (validData.length === 0) {
+                document.getElementById('avgAlpha').textContent = 'N/A';
+                document.getElementById('avgBeta').innerHTML = '<span style="font-size: 0.8em">β⁺: N/A<br>β⁻: N/A</span>';
+                document.getElementById('validPoints').textContent = '0';
+                document.getElementById('dataRange').textContent = 'No data';
+                return;
+            }
+
+            const avgAlpha = validData.reduce((sum, d) => sum + d.alpha, 0) / validData.length;
+            const avgBetaPos = validData.reduce((sum, d) => sum + d.beta_positive, 0) / validData.length;
+            const avgBetaNeg = validData.reduce((sum, d) => sum + d.beta_negative, 0) / validData.length;
+
+            // Count how many times betas are significantly different
+            const significantDiffCount = validData.filter(d => d.betas_significantly_different === true).length;
+            const significantDiffPercent = (significantDiffCount / validData.length * 100).toFixed(1);
+
+            // Find date range
+            const dates = validData.map(d => new Date(d.date));
+            const minDate = new Date(Math.min(...dates));
+            const maxDate = new Date(Math.max(...dates));
+            const dateRange = `${minDate.toLocaleDateString()} - ${maxDate.toLocaleDateString()}`;
+
+            document.getElementById('avgAlpha').textContent = avgAlpha.toFixed(6);
+            document.getElementById('avgBeta').innerHTML = 
+                `<span style="font-size: 0.8em">β⁺: ${avgBetaPos.toFixed(4)}<br>β⁻: ${avgBetaNeg.toFixed(4)}</span>` +
+                `<span class="asymmetry-indicator ${significantDiffPercent > 50 ? 'asymmetry-significant' : 'asymmetry-not-significant'}">${significantDiffPercent}% asymmetric</span>`;
+            document.getElementById('validPoints').textContent = validData.length.toLocaleString();
+            document.getElementById('dataRange').textContent = dateRange;
+        }
+
+        // Display comparison charts for segmented analysis
+        async function displaySegmentedComparisonCharts(data1, data2, coinId1, coinId2) {
+            const container = document.getElementById('chartContainer');
+            container.innerHTML = '';
+
+            // Destroy existing charts
+            Object.values(charts).forEach(chart => chart.destroy());
+            charts = {};
+
+            // Get coin names for labels
+            const coin1Name = document.querySelector(`#coinSelect option[value="${coinId1}"]`).textContent;
+            const coin2Name = document.querySelector(`#coinSelect option[value="${coinId2}"]`).textContent;
+
+            // Show price comparison chart
+            await createPriceComparisonChart(container, coinId1, coinId2, coin1Name, coin2Name);
+
+            // Show alpha comparison
+            createSegmentedComparisonChart(container, data1, data2, 'alpha', 'Alpha Coefficient Comparison', 
+                                         coin1Name, coin2Name, '#667eea', '#e53e3e');
+
+            // Show segmented beta comparison
+            createSegmentedBetaComparisonChart(container, data1, data2, coin1Name, coin2Name);
+        }
+
+        // Create segmented beta comparison chart
+        function createSegmentedBetaComparisonChart(container, data1, data2, coin1Name, coin2Name) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+
+            const titleElem = document.createElement('h3');
+            titleElem.className = 'chart-title';
+            titleElem.textContent = 'Segmented Beta Comparison';
+            wrapper.appendChild(titleElem);
+
+            // Add chart controls
+            const controls = document.createElement('div');
+            controls.className = 'chart-controls';
+            controls.innerHTML = `
+                <button class="chart-control-btn" onclick="resetZoom('segmented_beta_comparison')">Reset Zoom</button>
+                <button class="chart-control-btn" onclick="toggleSegmentedComparisonConfidenceBands('segmented_beta_comparison')">Toggle 90% CI</button>
+            `;
+            wrapper.appendChild(controls);
+
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            // Filter and align data
+            const validData1 = data1.filter(d => d.beta_positive !== null && d.beta_negative !== null);
+            const validData2 = data2.filter(d => d.beta_positive !== null && d.beta_negative !== null);
+
+            // Find common dates
+            const dates1 = new Set(validData1.map(d => d.date));
+            const dates2 = new Set(validData2.map(d => d.date));
+            const commonDates = [...dates1].filter(date => dates2.has(date)).sort();
+
+            // Calculate viewing window
+            const windowSize = parseInt(document.getElementById('windowSize').value);
+            const viewSize = Math.max(windowSize, 30);
+            
+            let minDate, maxDate;
+            if (commonDates.length > 0) {
+                maxDate = new Date(commonDates[commonDates.length - 1]);
+                minDate = new Date(maxDate);
+                minDate.setDate(minDate.getDate() - viewSize + 1);
+            }
+
+            // Prepare datasets
+            const datasets = [
+                // Coin 1 betas
+                {
+                    label: `${coin1Name.split(' ')[0]} β⁺`,
+                    data: commonDates.map(date => {
+                        const point = validData1.find(d => d.date === date);
+                        return point ? point.beta_positive : null;
+                    }),
+                    borderColor: '#48bb78',
+                    backgroundColor: '#48bb7820',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0.1,
+                    fill: false
+                },
+                {
+                    label: `${coin1Name.split(' ')[0]} β⁻`,
+                    data: commonDates.map(date => {
+                        const point = validData1.find(d => d.date === date);
+                        return point ? point.beta_negative : null;
+                    }),
+                    borderColor: '#f56565',
+                    backgroundColor: '#f5656520',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0.1,
+                    fill: false,
+                    borderDash: [5, 5]
+                },
+                // Coin 2 betas
+                {
+                    label: `${coin2Name.split(' ')[0]} β⁺`,
+                    data: commonDates.map(date => {
+                        const point = validData2.find(d => d.date === date);
+                        return point ? point.beta_positive : null;
+                    }),
+                    borderColor: '#805ad5',
+                    backgroundColor: '#805ad520',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0.1,
+                    fill: false
+                },
+                {
+                    label: `${coin2Name.split(' ')[0]} β⁻`,
+                    data: commonDates.map(date => {
+                        const point = validData2.find(d => d.date === date);
+                        return point ? point.beta_negative : null;
+                    }),
+                    borderColor: '#dd6b20',
+                    backgroundColor: '#dd6b2020',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    tension: 0.1,
+                    fill: false,
+                    borderDash: [5, 5]
+                }
+            ];
+
+            // Add reference line
+            datasets.push({
+                label: 'Reference (β = 1)',
+                data: commonDates.map(() => 1),
+                borderColor: 'rgba(128, 128, 128, 0.5)',
+                borderWidth: 1,
+                borderDash: [10, 5],
+                pointRadius: 0,
+                fill: false
+            });
+
+            const ctx = canvas.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: commonDates,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                filter: function(item) {
+                                    return !item.text.includes('Reference');
+                                },
+                                color: '#e0e0e0',
+                                padding: 15,
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                            titleColor: '#e0e0e0',
+                            bodyColor: '#e0e0e0',
+                            borderColor: '#333',
+                            borderWidth: 1,
+                            padding: 12,
+                            displayColors: true,
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.parsed.y !== null) {
+                                        const label = `${context.dataset.label}: ${context.parsed.y.toFixed(6)}`;
+                                        
+                                        // Add asymmetry info for negative betas
+                                        if (context.dataset.label.includes('β⁻')) {
+                                            const date = commonDates[context.dataIndex];
+                                            const coinData = context.dataset.label.includes(coin1Name.split(' ')[0]) ? 
+                                                           validData1 : validData2;
+                                            const point = coinData.find(d => d.date === date);
+                                            
+                                            if (point && point.betas_significantly_different !== null) {
+                                                return [
+                                                    label,
+                                                    point.betas_significantly_different ? 
+                                                        '⚠️ Asymmetric response' : 
+                                                        '↔️ Symmetric response'
+                                                ];
+                                            }
+                                        }
+                                        
+                                        return label;
+                                    }
+                                    return null;
+                                }
+                            }
+                        },
+                        zoom: {
+                            limits: {
+                                x: {
+                                    min: 'original',
+                                    max: 'original'
+                                },
+                                y: {
+                                    min: 'original',
+                                    max: 'original'
+                                }
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                modifierKey: null
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                    speed: 0.1
+                                },
+                                drag: {
+                                    enabled: false
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM DD'
+                                }
+                            },
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                maxRotation: 45,
+                                minRotation: 0
+                            },
+                            min: minDate,
+                            max: maxDate
+                        },
+                        y: {
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                callback: function(value) {
+                                    return value.toFixed(4);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            charts['segmented_beta_comparison'] = chart;
+        }
+
+        // Create segmented comparison chart for alpha
+        function createSegmentedComparisonChart(container, data1, data2, dataKey, title, label1, label2, color1, color2) {
+            // This is similar to createComparisonChart but uses segmented data
+            // Implementation follows the same pattern as regular comparison charts
+            // but reads from segmented data structure
+            
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-wrapper';
+
+            const titleElem = document.createElement('h3');
+            titleElem.className = 'chart-title';
+            titleElem.textContent = title;
+            wrapper.appendChild(titleElem);
+
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            container.appendChild(wrapper);
+
+            // Filter and process data similar to regular comparison
+            const validData1 = data1.filter(d => d[dataKey] !== null);
+            const validData2 = data2.filter(d => d[dataKey] !== null);
+
+            // Find common dates and create chart
+            const dates1 = new Set(validData1.map(d => d.date));
+            const dates2 = new Set(validData2.map(d => d.date));
+            const commonDates = [...dates1].filter(date => dates2.has(date)).sort();
+
+            // Rest of implementation follows the same pattern as createComparisonChart
+            // but uses the segmented data structure
+            
+            // Create the chart with appropriate datasets
+            const ctx = canvas.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: commonDates,
+                    datasets: [
+                        {
+                            label: label1.split(' ')[0],
+                            data: commonDates.map(date => {
+                                const point = validData1.find(d => d.date === date);
+                                return point ? point[dataKey] : null;
+                            }),
+                            borderColor: color1,
+                            backgroundColor: color1 + '20',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                            tension: 0.1,
+                            fill: false
+                        },
+                        {
+                            label: label2.split(' ')[0],
+                            data: commonDates.map(date => {
+                                const point = validData2.find(d => d.date === date);
+                                return point ? point[dataKey] : null;
+                            }),
+                            borderColor: color2,
+                            backgroundColor: color2 + '20',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                            tension: 0.1,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#e0e0e0',
+                                padding: 15,
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888'
+                            }
+                        },
+                        y: {
+                            grid: {
+                                color: '#2a2a2a'
+                            },
+                            ticks: {
+                                color: '#888',
+                                callback: function(value) {
+                                    return value.toFixed(4);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            charts[dataKey + '_segmented_comparison'] = chart;
+        }
+
+        // Update comparison statistics for segmented analysis
+        function updateSegmentedComparisonStatistics(data1, data2, coinId1, coinId2) {
+            // Get coin names
+            const coin1Name = document.querySelector(`#coinSelect option[value="${coinId1}"]`).textContent.split(' ')[0];
+            const coin2Name = document.querySelector(`#coinSelect option[value="${coinId2}"]`).textContent.split(' ')[0];
+
+            // Calculate statistics for both coins
+            const validData1 = data1.filter(d => d.alpha !== null && d.beta_positive !== null && d.beta_negative !== null);
+            const validData2 = data2.filter(d => d.alpha !== null && d.beta_positive !== null && d.beta_negative !== null);
+
+            if (validData1.length === 0 && validData2.length === 0) {
+                document.getElementById('avgAlpha').textContent = 'N/A';
+                document.getElementById('avgBeta').textContent = 'N/A';
+                document.getElementById('validPoints').textContent = '0';
+                document.getElementById('dataRange').textContent = 'No data';
+                return;
+            }
+
+            // Calculate averages
+            const avgAlpha1 = validData1.length > 0 ? 
+                validData1.reduce((sum, d) => sum + d.alpha, 0) / validData1.length : 0;
+            const avgAlpha2 = validData2.length > 0 ? 
+                validData2.reduce((sum, d) => sum + d.alpha, 0) / validData2.length : 0;
+            
+            const avgBetaPos1 = validData1.length > 0 ? 
+                validData1.reduce((sum, d) => sum + d.beta_positive, 0) / validData1.length : 0;
+            const avgBetaNeg1 = validData1.length > 0 ? 
+                validData1.reduce((sum, d) => sum + d.beta_negative, 0) / validData1.length : 0;
+            
+            const avgBetaPos2 = validData2.length > 0 ? 
+                validData2.reduce((sum, d) => sum + d.beta_positive, 0) / validData2.length : 0;
+            const avgBetaNeg2 = validData2.length > 0 ? 
+                validData2.reduce((sum, d) => sum + d.beta_negative, 0) / validData2.length : 0;
+
+            // Update display
+            document.getElementById('avgAlpha').innerHTML = 
+                `<span style="font-size: 0.8em">${coin1Name}: ${avgAlpha1.toFixed(6)}<br>${coin2Name}: ${avgAlpha2.toFixed(6)}</span>`;
+            document.getElementById('avgBeta').innerHTML = 
+                `<span style="font-size: 0.7em">${coin1Name} β⁺: ${avgBetaPos1.toFixed(4)} β⁻: ${avgBetaNeg1.toFixed(4)}<br>` +
+                `${coin2Name} β⁺: ${avgBetaPos2.toFixed(4)} β⁻: ${avgBetaNeg2.toFixed(4)}</span>`;
+            
+            // Combined valid points
+            document.getElementById('validPoints').innerHTML = 
+                `<span style="font-size: 0.8em">${coin1Name}: ${validData1.length}<br>${coin2Name}: ${validData2.length}</span>`;
+            
+            // Find common date range
+            const allDates = [
+                ...validData1.map(d => new Date(d.date)),
+                ...validData2.map(d => new Date(d.date))
+            ];
+            if (allDates.length > 0) {
+                const minDate = new Date(Math.min(...allDates));
+                const maxDate = new Date(Math.max(...allDates));
+                document.getElementById('dataRange').textContent = 
+                    `${minDate.toLocaleDateString()} - ${maxDate.toLocaleDateString()}`;
+            } else {
+                document.getElementById('dataRange').textContent = 'No data';
+            }
+        }
+
+        // Toggle function for segmented comparison confidence bands
+        window.toggleSegmentedComparisonConfidenceBands = function(chartKey) {
+            const chart = charts[chartKey];
+            if (chart) {
+                chart.confidenceBandsVisible = !chart.confidenceBandsVisible;
+                
+                // Toggle visibility of all CI datasets
+                chart.data.datasets.forEach((dataset, index) => {
+                    if (dataset.label.includes('CI')) {
+                        chart.data.datasets[index].hidden = !chart.confidenceBandsVisible;
+                    }
+                });
+                
+                chart.update('none');
             }
         }
 
@@ -1313,7 +2625,7 @@
                                 displayColors: true,
                                 callbacks: {
                                     label: function(context) {
-                                        return `${context.dataset.label}: $${context.parsed.y.toLocaleString(undefined, {
+                                        return `${context.dataset.label}: ${context.parsed.y.toLocaleString(undefined, {
                                             minimumFractionDigits: 2,
                                             maximumFractionDigits: 2
                                         })}`;
@@ -1635,7 +2947,7 @@
                                         if (normalized) {
                                             return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}%`;
                                         } else {
-                                            return `${context.dataset.label}: $${context.parsed.y.toLocaleString(undefined, {
+                                            return `${context.dataset.label}: ${context.parsed.y.toLocaleString(undefined, {
                                                 minimumFractionDigits: 2,
                                                 maximumFractionDigits: 2
                                             })}`;
@@ -1898,6 +3210,12 @@
         function showError(message) {
             const container = document.getElementById('chartContainer');
             container.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // Show warning message
+        function showWarning(message) {
+            const container = document.getElementById('chartContainer');
+            container.innerHTML = `<div class="warning">${message}</div>`;
         }
 
         // Initialize on page load
