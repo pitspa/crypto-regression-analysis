@@ -84,7 +84,7 @@ Per coin, the raw price series is cleaned as follows:
 Daily **log returns** are then computed:
 
 $$
-r_t = \ln\!\left(\frac{P_t}{P_{t-1}}\right)
+r_t = \ln\left(\frac{P_t}{P_{t-1}}\right)
 $$
 
 (The first observation is `NaN` by construction and is handled downstream.)
@@ -125,7 +125,7 @@ $$
 - **$\alpha$ (alpha)** — average return of the coin not explained by its co-movement with Bitcoin (the intercept).
 - **$\beta$ (beta)** — sensitivity to Bitcoin. $\beta > 1$ amplifies BTC moves, $\beta < 1$ dampens them.
 
-Standard errors come from the OLS variance–covariance matrix $\widehat{\operatorname{Var}}(\hat{\boldsymbol\theta}) = s^2 (X^\top X)^{-1}$, with $s^2 = \mathrm{RSS}/(n-2)$ and $n-2$ degrees of freedom; **90% confidence intervals** are reported for both $\alpha$ and $\beta$.
+Standard errors come from the OLS variance–covariance matrix $\widehat{\mathrm{Var}}(\hat{\boldsymbol\theta}) = s^2 (X^\top X)^{-1}$, with $s^2 = \mathrm{RSS}/(n-2)$ and $n-2$ degrees of freedom; **90% confidence intervals** are reported for both $\alpha$ and $\beta$.
 
 **Window sizes:** 7 (1 week), 14 (2 weeks), 30 (1 month), 60 (2 months), 90 (3 months), 120 (4 months), and 180 (6 months) days.
 
@@ -149,10 +149,10 @@ Guards: the window must contain **at least 5 positive and 5 negative** Bitcoin-r
 $$
 H_0: \beta^{+} = \beta^{-}
 \qquad
-t = \frac{\hat\beta^{+} - \hat\beta^{-}}{\sqrt{\widehat{\operatorname{Var}}(\hat\beta^{+}) + \widehat{\operatorname{Var}}(\hat\beta^{-}) - 2\,\widehat{\operatorname{Cov}}(\hat\beta^{+}, \hat\beta^{-})}}
+t = \frac{\hat\beta^{+} - \hat\beta^{-}}{\sqrt{\widehat{\mathrm{Var}}(\hat\beta^{+}) + \widehat{\mathrm{Var}}(\hat\beta^{-}) - 2\,\widehat{\mathrm{Cov}}(\hat\beta^{+}, \hat\beta^{-})}}
 $$
 
-The denominator is exactly $\widehat{\operatorname{Var}}(\hat\beta^{+} - \hat\beta^{-})$, with all three terms taken directly from the OLS coefficient covariance matrix (verified against the source). Although written as a $t$-ratio, the statistic is compared against the **standard normal** distribution — the two-tailed p-value is $p = 2\,[\,1 - \Phi(|t|)\,]$, with $\Phi$ evaluated through an Abramowitz–Stegun `erf` approximation — so in practice it is a Wald / z test. The betas are flagged **significantly different at the 90% level** when $p < 0.10$.
+The denominator is exactly $\widehat{\mathrm{Var}}(\hat\beta^{+} - \hat\beta^{-})$, with all three terms taken directly from the OLS coefficient covariance matrix (verified against the source). Although written as a $t$-ratio, the statistic is compared against the **standard normal** distribution — the two-tailed p-value is $p = 2\,[\,1 - \Phi(|t|)\,]$, with $\Phi$ evaluated through an Abramowitz–Stegun `erf` approximation — so in practice it is a Wald / z test. The betas are flagged **significantly different at the 90% level** when $p < 0.10$.
 
 **Window sizes:** 60 (2 months), 90 (3 months), 120 (4 months), and 180 (6 months) days — segmented analysis is intentionally restricted to the longer windows so each sign regime has enough observations.
 
